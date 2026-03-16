@@ -1,0 +1,56 @@
+# PLAN DE DEZVOLTARE – Manager Clienți Modern
+
+## Structură modulară (taburi/zone)
+
+- [x] Tab Clienți: CRUD, editare, paginare, export, istoric acțiuni
+- [ ] Tab Lucrări: materiale, deviz, ordin serviciu, export Word
+- [ ] Tab Atașamente: upload/download, duplicate, ștergere- din tab clienti
+- [ ] Tab Financiar: facturi/plăți, sold, export
+- [ ] Tab Calendar: intervenții, status, raport
+- [ ] Tab Chat: chat intern, arhivă, export
+- [ ] Tab Alerte: alerte, filtrare, rezolvare
+- [ ] Tab Generare Word: export automat client, modele custom
+- [ ] Dashboard/Raportare: KPI, statistici, grafice
+- [ ] Optimizări/extra: API, notificări, audit, istoric
+
+---
+
+## Etape / Grafic lucrări
+
+| Etapă                      | Descriere                        | Durata estimată | Status |
+|----------------------------|-----------------------------------|-----------------|--------|
+| Fragmentare & Plan         | Arhitectură, roadmap              | 1 zi            | [ ]    |
+| Tab Clienți                | CRUD, export, istoric             | 1-3 zile        | [ x]    |
+| Tab Lucrări                | Materiale/deviz/ordin Word        | 1-3 zile        | [ ]    |
+| Tab Atașamente             | Upload/download, curățare         | 1 zi            | [x ]    |
+| Tab Financiar              | Facturi, plăți, sold              | 1 zi            | [ ]    |
+| Tab Chat                   | Chat intern, arhivă               | 1 zi            | [ ]    |
+| Tab Alerte                 | Alerta și rezolvări               | 0.5 zi          | [ ]    |
+| Tab Calendar               | Programare intervenții            | 1 zi            | [ ]    |
+| Tab Generare Word          | Export model .docx                | 0.5 zi          | [ ]    |
+| Dashboard/Raportare        | KPI, statistici, grafice          | 1 zi            | [ ]    |
+| Optimizări/extra           | API, notificări, audit, istoric   | ongoing         | [ ]    |
+
+---
+
+## Update & Progress
+
+- Planul se updatează la fiecare mini-etapă (tick/untick la fiecare task)
+- Status se poate integra rapid în Streamlit sau Notion/Trello
+- Orice modificare majoră/completare la idea, se adaugă aici!
+
+---
+
+## Idei extra (doar dacă se dovedesc utile):
+- Catalog materiale cu prețuri implicite
+- Facturare directă din deviz/oridin serviciu
+- Dashboard vizual la home
+- API pentru conectare cu ERP/facturare
+- Mobile friendly/layout adaptiv
+
+---
+
+## Cum folosim planul?
+- Îl consultăm la fiecare sesiune de lucru
+- Îl completăm și tăiem/contorizăm ce am terminat
+- Putem integra chiar ca tab Streamlit “PLAN/ROADMAP”
