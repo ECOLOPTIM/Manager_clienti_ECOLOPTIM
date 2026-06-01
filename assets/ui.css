@@ -1,0 +1,215 @@
+:root{
+  --card-bg: #ffffff;
+  --card-border: rgba(15, 23, 42, 0.10);
+  --muted: rgba(15, 23, 42, 0.65);
+  --shadow: 0 10px 30px rgba(2, 6, 23, 0.08);
+
+  --blue: #0A84FF;
+  --green: #10B981;
+  --orange: #F59E0B;
+  --red: #EF4444;
+}
+
+/* =========================
+   GLOBAL FONT: 13px (stabil)
+   ========================= */
+
+html, body, .stApp{
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+}
+
+/* majoritatea textelor / widget-urilor */
+.stApp p,
+.stApp label,
+.stApp span,
+.stApp div,
+.stApp input,
+.stApp textarea,
+.stApp button,
+.stApp [role="combobox"],
+.stApp [role="listbox"]{
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+}
+
+/* NU micșora codul */
+.stApp code,
+.stApp pre,
+.stApp pre *{
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+}
+
+/* păstrează headings ca headings */
+.stApp h1{ font-size: 30px !important; line-height: 1.15 !important; }
+.stApp h2{ font-size: 24px !important; line-height: 1.15 !important; }
+.stApp h3{ font-size: 20px !important; line-height: 1.15 !important; }
+
+/* (opțional) sidebar puțin mai mic */
+section[data-testid="stSidebar"] *{
+  font-size: 12.5px !important;
+}
+
+/* =========================
+   Layout spacing
+   ========================= */
+section.main > div { padding-top: 0.6rem; }
+.block-container { padding-top: 0.6rem; }
+
+/* ---------- Header ---------- */
+.eco-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+}
+.eco-brand{ display:flex; align-items:center; gap: 10px; }
+.eco-logo{
+  width: 40px; height: 40px; border-radius: 12px;
+  display:flex; align-items:center; justify-content:center;
+  background: rgba(10,132,255,0.10);
+  border: 1px solid rgba(10,132,255,0.20);
+  font-weight: 900;
+}
+.eco-title{ font-size: 18px; font-weight: 950; margin:0; line-height:1.1;}
+.eco-sub{ font-size: 12px; color: var(--muted); margin:0; }
+.eco-user{ display:flex; align-items:center; gap: 10px; color: var(--muted); }
+
+/* ---------- Cards & filter bar ---------- */
+.eco-card{
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+.eco-filters{
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+/* ---------- Login styling hooks ---------- */
+.login-wrap { max-width: 520px; margin: 0 auto; padding-top: 42px; }
+.login-card {
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  padding: 18px 18px 14px 18px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+}
+.login-head { display:flex; align-items:center; gap: 12px; margin-bottom: 10px; }
+.login-title { font-size: 22px; font-weight: 950; margin: 0; }
+.login-sub { opacity: 0.78; margin: 0; font-size: 13px; color: var(--muted); }
+.login-footer { opacity: 0.60; font-size: 12px; margin-top: 10px; color: var(--muted); }
+
+/* Login inputs nicer (scoped) */
+.login-card div[data-testid="stTextInput"] input{
+  border-radius: 12px !important;
+  text-align: center !important;
+}
+.login-card div[data-testid="stTextInput"] input::placeholder{
+  text-align: center !important;
+}
+.login-card label[data-testid="stWidgetLabel"]{
+  width: 100%;
+  text-align: center !important;
+}
+.login-card div.stButton > button{
+  width: 100% !important;
+  border-radius: 12px !important;
+  font-weight: 900 !important;
+}
+
+/* =========================
+   CLIENTS: compact grid table
+   ========================= */
+
+.clients-table .eco-card{ padding: 10px; }
+
+.clients-grid{
+  display: grid;
+  grid-template-columns:
+    1.0fr 1.8fr 1.8fr 1.1fr 1.6fr 1.6fr 0.8fr 1.4fr 1.0fr 1.0fr 1.0fr;
+  column-gap: 14px;
+  align-items: center;
+}
+
+.clients-grid-header{
+  font-weight: 900;
+  opacity: 0.85;
+  padding: 0 0 10px 0;
+  border-bottom: 1px solid rgba(15,23,42,0.10);
+  letter-spacing: 0.02em;
+}
+
+.clients-grid-row{
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(15,23,42,0.06);
+}
+.clients-grid-row:hover{
+  background: rgba(10,132,255,0.06);
+  border-radius: 10px;
+}
+.clients-grid-row.selected{
+  background: rgba(10,132,255,0.10);
+  border-radius: 10px;
+  outline: 1px solid rgba(10,132,255,0.25);
+}
+
+.clients-grid .clip{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* action bar (selected client) */
+.clients-actionbar{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 6px 0;
+  border: 1px solid rgba(15,23,42,0.10);
+  border-radius: 12px;
+  background: rgba(2,6,23,0.02);
+}
+.clients-actionbar .meta{
+  opacity: 0.85;
+}
+
+/* icon buttons wrapper */
+.eco-icon-btn{
+  display: flex;
+  justify-content: center;
+}
+
+/* ONLY icon-buttons compact */
+.eco-icon-btn button{
+  padding: 0px 8px !important;
+  min-height: 28px !important;
+  height: 28px !important;
+  min-width: 40px !important;
+  border-radius: 10px !important;
+  line-height: 1 !important;
+}
+.eco-icon-btn button *{
+  line-height: 1 !important;
+}
+
+/* Reduce paragraph margin inside clients table */
+.clients-table p{ margin: 0 !important; }
+/* numbers: align right + same-width digits */
+.clients-grid .num{
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}

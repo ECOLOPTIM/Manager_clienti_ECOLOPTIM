@@ -1,6 +1,5 @@
 import streamlit as st
-import db.db as db
 
 def show(user):
     st.header("💶 Financiar — ECOLOPTIM_clienti")
-    st.info("Aici gestionezi facturile/plățile asociate cliților.")
+    st.info("Financiarul este disponibil pe fiecare client: mergi la 👥 Clienți și apasă butonul 💶 pe rândul clientului.")
