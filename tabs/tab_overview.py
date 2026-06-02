@@ -2,6 +2,15 @@ import streamlit as st
 import db.db as db
 import pandas as pd
 
+TIPURI_CU_PIF = [
+    "Instalatie de utilizare noua",
+    "Suplimentare debit instalat",
+    "Bransament nou prin DGSR",
+    "Bransament nou cu OE client",
+    "Extindere retea",
+    "Extindere retea cu bransament",
+]
+
 
 def _kpi_card(title: str, value: str, sub: str = "", color: str = "#0A84FF"):
     st.markdown(
@@ -39,12 +48,41 @@ def _fmt_due(dt) -> str:
     return pd.to_datetime(dt).strftime("%Y-%m-%d")
 
 
+def _count_executate_fara_pif(df_l: pd.DataFrame) -> int:
+    if df_l is None or df_l.empty:
+        return 0
+
+    df = df_l.copy()
+    for col in ["data_programare_pif", "interval_orar_pif", "echipa_pif", "sef_echipa_pif"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    df["tip_lucrare"] = df["tip_lucrare"].fillna("").astype(str).str.strip()
+    df["status"] = df["status"].fillna("").astype(str).str.strip().str.upper()
+
+    df = df[
+        df["tip_lucrare"].isin(TIPURI_CU_PIF) &
+        (df["status"] == "EXECUTAT")
+    ].copy()
+
+    if df.empty:
+        return 0
+
+    df = df[
+        df["data_programare_pif"].fillna("").astype(str).str.strip().eq("") |
+        df["interval_orar_pif"].fillna("").astype(str).str.strip().eq("") |
+        df["echipa_pif"].fillna("").astype(str).str.strip().eq("") |
+        df["sef_echipa_pif"].fillna("").astype(str).str.strip().eq("")
+    ].copy()
+
+    return int(len(df))
+
+
 def show(user):
     st.markdown("### 🏠 Overview")
 
     today = pd.Timestamp.today().normalize()
 
-    # ----------------- Sarcini -----------------
     df_s = db.lista_sarcini_all(filtru_status="", filtru_text="")
     if df_s is None:
         df_s = pd.DataFrame()
@@ -85,7 +123,6 @@ def show(user):
     else:
         overdue = in_lucru = blocat = total_sarcini = finalizate = 0
 
-    # ----------------- Lucrări -----------------
     df_l = db.lista_lucrari()
     if df_l is None:
         df_l = pd.DataFrame()
@@ -95,10 +132,10 @@ def show(user):
         df_l["__prog_dt"] = pd.to_datetime(df_l.get("data_programare", ""), errors="coerce")
         prog_azi = int((df_l["__prog_dt"].dt.normalize() == today).sum())
         total_lucrari = int(len(df_l))
+        executate_fara_pif = _count_executate_fara_pif(df_l)
     else:
-        prog_azi = total_lucrari = 0
+        prog_azi = total_lucrari = executate_fara_pif = 0
 
-    # ----------------- Financiar -----------------
     try:
         solduri = db.solduri_pe_clienti() or {}
         total_sold = float(sum(float(v or 0.0) for v in solduri.values()))
@@ -107,8 +144,7 @@ def show(user):
         total_sold = 0.0
         restantieri = 0
 
-    # ----------------- KPI row -----------------
-    k = st.columns(5)
+    k = st.columns(6)
     with k[0]:
         _kpi_card("Sarcini depășite", str(overdue), "Termen depășit (și nu sunt FINALIZATE)", color="#EF4444")
     with k[1]:
@@ -118,11 +154,12 @@ def show(user):
     with k[3]:
         _kpi_card("Lucrări azi", str(prog_azi), today.strftime("%Y-%m-%d"), color="#8B5CF6")
     with k[4]:
+        _kpi_card("Executate fără PIF", str(executate_fara_pif), "Lucrări gaze executate fără PIF complet", color="#F97316")
+    with k[5]:
         _kpi_card("SOLD total", f"{total_sold:,.0f}", f"Restanțieri: {restantieri}", color="#0F172A")
 
     st.markdown("---")
 
-    # ----------------- Liste rapide -----------------
     left, mid, right = st.columns([1.15, 1.00, 0.85], gap="large")
 
     with left:

@@ -2,25 +2,10 @@ import streamlit as st
 import db.db as db
 import pandas as pd
 import io
-
-STATUS_COLORS = {
-    "OFERTAT": ("🟡", "#e6b800"),
-    "PROGRAMAT": ("🟣", "#a259d9"),
-    "CONTRACTAT": ("🟢", "#6bc000"),
-    "EXECUTAT": ("🔵", "#0090ff"),
-    "FINALIZAT": ("⚪", "#b0b0b0"),
-    "ÎNCHIS": ("🔴", "#d01a1a"),
-}
-STATUS_OPTIONS = ["OFERTAT", "PROGRAMAT", "CONTRACTAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
+from tabs.utils_status import format_status
 
 
-def status_display(status):
-    emoji, color = STATUS_COLORS.get(str(status).upper(), ("⚪", "#b0b0b0"))
-    return (
-        f"<span style='color:{color}; font-size:14px; vertical-align:middle;'>{emoji}</span> "
-        f"<span style='vertical-align:middle;'>{str(status)}</span>"
-    )
-
+STATUS_OPTIONS = ["OFERTAT", "CONTRACTAT", "PROGRAMAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
 
 def close_all_modals():
     st.session_state.pop("add_client_open", None)
@@ -111,11 +96,10 @@ def show(user):
     if st.session_state.get("add_client_open"):
         st.subheader("➕ Adăugare client")
 
-        with st.form("add_client_form", clear_on_submit=True):
-            col_status, col_obs, col_save = st.columns([1.3, 2.7, 1])
+        with st.form("add_client_form", clear_on_submit=False):
+            col_status, col_obs = st.columns([1.3, 2.7])
             status = col_status.selectbox("STATUS", STATUS_OPTIONS, key="add_status")
             observatii = col_obs.text_area("OBSERVAȚII", key="add_obs")
-            save_btn = col_save.form_submit_button("💾 SALVEAZĂ CLIENTUL")
 
             col_nume, col_email, col_telefon = st.columns([2, 2, 1.7])
             nume = col_nume.text_input("NUME COMPLET", key="add_nume")
@@ -174,14 +158,34 @@ def show(user):
                 consum_bloc = col_bloc2.text_input("BLOC", key="add_con_bloc")
                 consum_apartament = col_ap2.text_input("APARTAMENT", key="add_con_ap")
 
+            c1, c2, _ = st.columns([1.2, 1.2, 6])
+            with c1:
+                save_btn = st.form_submit_button("💾 SALVEAZĂ CLIENTUL", use_container_width=True)
+            with c2:
+                cancel_btn = st.form_submit_button("⛔ RENUNȚĂ", use_container_width=True)
+
+            if cancel_btn:
+                st.session_state["add_client_open"] = False
+                st.rerun()
+
             if save_btn:
-                if not nume or not email:
-                    st.error("Completează NUME și EMAIL!")
+                email_clean = str(email or "").strip()
+                telefon_clean = str(telefon or "").strip()
+                nume_clean = str(nume or "").strip()
+
+                if not nume_clean:
+                    st.error("Completează NUMELE clientului.")
+                elif not email_clean and not telefon_clean:
+                    st.error("Completează cel puțin EMAIL sau TELEFON.")
+                elif email_clean and ("@" not in email_clean or "." not in email_clean.split("@")[-1]):
+                    st.error("Adresa de email nu pare validă.")
+                elif telefon_clean and len(telefon_clean.replace(" ", "").replace("-", "")) < 7:
+                    st.error("Numărul de telefon pare prea scurt.")
                 else:
                     valori = {
-                        "nume": nume,
-                        "email": email,
-                        "telefon": telefon,
+                        "nume": nume_clean,
+                        "email": email_clean,
+                        "telefon": telefon_clean,
                         "firma": firma,
                         "status": status,
                         "observatii": observatii,
@@ -209,13 +213,10 @@ def show(user):
                         "consum_apartament": consum_apartament,
                     }
                     db.adauga_client(valori)
-                    st.success(f"Clientul {nume.upper()} a fost adăugat!")
+                    st.success(f"Clientul {nume_clean.upper()} a fost adăugat!")
                     st.session_state["add_client_open"] = False
                     st.rerun()
 
-        if st.button("⛔ RENUNȚĂ", key="close_add_client"):
-            st.session_state["add_client_open"] = False
-            st.rerun()
         return
 
     # =========================
@@ -229,7 +230,7 @@ def show(user):
         st.subheader(f"✏️ Editare client — {str(row.get('nume', '')).upper()}")
 
         with st.form(f"edit_client_form_{client_id}", clear_on_submit=False):
-            col_status, col_obs, col_save = st.columns([1.3, 2.7, 1])
+            col_status, col_obs = st.columns([1.3, 2.7])
             status = col_status.selectbox(
                 "STATUS",
                 STATUS_OPTIONS,
@@ -239,7 +240,6 @@ def show(user):
                 key="edit_status",
             )
             observatii = col_obs.text_area("OBSERVAȚII", value=str(row.get("observatii", "")), key="edit_obs")
-            save_btn = col_save.form_submit_button("💾 SALVEAZĂ MODIFICĂRILE")
 
             col_nume, col_email, col_telefon = st.columns([2, 2, 1.7])
             nume = col_nume.text_input("NUME COMPLET", value=str(row["nume"]), key="edit_nume")
@@ -308,45 +308,65 @@ def show(user):
                 consum_bloc = col_bloc2.text_input("BLOC", value=str(row.get("consum_bloc", "")), key="edit_con_bloc")
                 consum_apartament = col_ap2.text_input("APARTAMENT", value=str(row.get("consum_apartament", "")), key="edit_con_ap")
 
-            if save_btn:
-                valori = {
-                    "nume": nume,
-                    "email": email,
-                    "telefon": telefon,
-                    "firma": firma,
-                    "status": status,
-                    "observatii": observatii,
-                    "cod_intern": cod_intern,
-                    "scor": scor,
-                    "remark": remark,
-                    "cnp": cnp,
-                    "ci_serie": ci_serie,
-                    "ci_numar": ci_numar,
-                    "ci_emitent": ci_emitent,
-                    "ci_data": ci_data,
-                    "domiciliu_judet": domiciliu_judet,
-                    "domiciliu_localitate": domiciliu_localitate,
-                    "domiciliu_strada": domiciliu_strada,
-                    "domiciliu_numar": domiciliu_numar,
-                    "domiciliu_bloc": domiciliu_bloc,
-                    "domiciliu_scara": domiciliu_scara,
-                    "domiciliu_etaj": domiciliu_etaj,
-                    "domiciliu_apartament": domiciliu_apartament,
-                    "consum_judet": consum_judet,
-                    "consum_localitate": consum_localitate,
-                    "consum_strada": consum_strada,
-                    "consum_numar": consum_numar,
-                    "consum_bloc": consum_bloc,
-                    "consum_apartament": consum_apartament,
-                }
-                db.modifica_client(client_id, valori)
-                st.success("DATELE CLIENTULUI AU FOST ACTUALIZATE!")
+            c1, c2, _ = st.columns([1.2, 1.2, 6])
+            with c1:
+                save_btn = st.form_submit_button("💾 SALVEAZĂ MODIFICĂRILE", use_container_width=True)
+            with c2:
+                cancel_btn = st.form_submit_button("⛔ ÎNCHIDE EDITAREA", use_container_width=True)
+
+            if cancel_btn:
                 del st.session_state["edit_client_id"]
                 st.rerun()
 
-        if st.button("⬅️ ÎNCHIDE EDITARE", key=f"close_edit_{client_id}"):
-            del st.session_state["edit_client_id"]
-            st.rerun()
+            if save_btn:
+                email_clean = str(email or "").strip()
+                telefon_clean = str(telefon or "").strip()
+                nume_clean = str(nume or "").strip()
+
+                if not nume_clean:
+                    st.error("Completează NUMELE clientului.")
+                elif not email_clean and not telefon_clean:
+                    st.error("Completează cel puțin EMAIL sau TELEFON.")
+                elif email_clean and ("@" not in email_clean or "." not in email_clean.split("@")[-1]):
+                    st.error("Adresa de email nu pare validă.")
+                elif telefon_clean and len(telefon_clean.replace(" ", "").replace("-", "")) < 7:
+                    st.error("Numărul de telefon pare prea scurt.")
+                else:
+                    valori = {
+                        "nume": nume_clean,
+                        "email": email_clean,
+                        "telefon": telefon_clean,
+                        "firma": firma,
+                        "status": status,
+                        "observatii": observatii,
+                        "cod_intern": cod_intern,
+                        "scor": scor,
+                        "remark": remark,
+                        "cnp": cnp,
+                        "ci_serie": ci_serie,
+                        "ci_numar": ci_numar,
+                        "ci_emitent": ci_emitent,
+                        "ci_data": ci_data,
+                        "domiciliu_judet": domiciliu_judet,
+                        "domiciliu_localitate": domiciliu_localitate,
+                        "domiciliu_strada": domiciliu_strada,
+                        "domiciliu_numar": domiciliu_numar,
+                        "domiciliu_bloc": domiciliu_bloc,
+                        "domiciliu_scara": domiciliu_scara,
+                        "domiciliu_etaj": domiciliu_etaj,
+                        "domiciliu_apartament": domiciliu_apartament,
+                        "consum_judet": consum_judet,
+                        "consum_localitate": consum_localitate,
+                        "consum_strada": consum_strada,
+                        "consum_numar": consum_numar,
+                        "consum_bloc": consum_bloc,
+                        "consum_apartament": consum_apartament,
+                    }
+                    db.modifica_client(client_id, valori)
+                    st.success("DATELE CLIENTULUI AU FOST ACTUALIZATE!")
+                    del st.session_state["edit_client_id"]
+                    st.rerun()
+
         return
 
     # =========================
@@ -365,10 +385,13 @@ def show(user):
         )
 
         if st.button("CONFIRMĂ ȘTERGEREA", key=f"confirm_del_{client_id}"):
-            db.sterge_client(client_id)
-            st.success("CLIENT ȘTERS!")
-            del st.session_state["delete_client_id"]
-            st.rerun()
+            try:
+                db.sterge_client(client_id)
+                st.success("CLIENT ȘTERS!")
+                del st.session_state["delete_client_id"]
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
 
         if st.button("ANULEAZĂ", key=f"cancel_del_{client_id}"):
             del st.session_state["delete_client_id"]
@@ -389,9 +412,9 @@ def show(user):
     rid = st.session_state["clienti_filters_reset"]
 
     st.markdown("<div class='eco-filters'>", unsafe_allow_html=True)
-    filter_cols = st.columns([3, 1.2, 1.2, 2, 2, 2, 1.1])
+    filter_cols = st.columns([3, 1.1, 1.1, 1.6, 1.8, 1.8, 1.8, 1.1])
 
-    filtru = filter_cols[0].text_input("Filtru rapid după nume/email", key=f"cli_text_{rid}")
+    filtru = filter_cols[0].text_input("Filtru rapid: nume / email / telefon / firmă / cod", key=f"cli_text_{rid}")
     df_full = db.lista_clienti(filtru)
 
     df_full = df_full.copy()
@@ -404,29 +427,34 @@ def show(user):
     an_select = filter_cols[1].selectbox("An", ["Toți"] + ani, index=0, key=f"cli_an_{rid}")
     luna_select = filter_cols[2].selectbox("Lună", ["Toate"] + luni, index=0, key=f"cli_luna_{rid}")
 
+    statusuri = ["Toate"] + STATUS_OPTIONS
+    status_select = filter_cols[3].selectbox("Status", statusuri, index=0, key=f"cli_status_{rid}")
+    
     if an_select != "Toți":
         df_full = df_full[df_full["__DATA"].dt.year == int(an_select)]
     if luna_select != "Toate":
         df_full = df_full[df_full["__DATA"].dt.month == int(luna_select)]
+    if status_select != "Toate":
+        df_full = df_full[df_full["status"].astype(str).str.upper() == str(status_select).upper()]
 
     toate_judetele = sorted(df_full["consum_judet"].dropna().astype(str).str.title().unique()) if not df_full.empty else []
-    judet_select = filter_cols[3].selectbox("Județ", ["Toate"] + toate_judetele, index=0, key=f"cli_j_{rid}")
+    judet_select = filter_cols[4].selectbox("Județ", ["Toate"] + toate_judetele, index=0, key=f"cli_j_{rid}")
 
     df_judet = df_full
     if judet_select != "Toate" and not df_judet.empty:
         df_judet = df_judet[df_judet["consum_judet"].astype(str).str.title() == judet_select]
 
     toate_localitatile = sorted(df_judet["consum_localitate"].dropna().astype(str).str.title().unique()) if not df_judet.empty else []
-    localitate_select = filter_cols[4].selectbox("Localitate", ["Toate"] + toate_localitatile, index=0, key=f"cli_loc_{rid}")
+    localitate_select = filter_cols[5].selectbox("Localitate", ["Toate"] + toate_localitatile, index=0, key=f"cli_loc_{rid}")
 
     df_loc = df_judet
     if localitate_select != "Toate" and not df_loc.empty:
         df_loc = df_loc[df_loc["consum_localitate"].astype(str).str.title() == localitate_select]
 
     toate_strazile = sorted(df_loc["consum_strada"].dropna().astype(str).str.title().unique()) if not df_loc.empty else []
-    strada_select = filter_cols[5].selectbox("Strada", ["Toate"] + toate_strazile, index=0, key=f"cli_str_{rid}")
-
-    if filter_cols[6].button("Reset", key=f"cli_reset_{rid}"):
+    strada_select = filter_cols[6].selectbox("Strada", ["Toate"] + toate_strazile, index=0, key=f"cli_str_{rid}")
+    
+    if filter_cols[7].button("Reset", key=f"cli_reset_{rid}"):
         st.session_state["clienti_filters_reset"] += 1
         st.rerun()
 
@@ -596,7 +624,7 @@ def show(user):
                   <div class="clip">{str(row.get('consum_localitate','')).upper()}</div>
                   <div class="clip">{str(row.get('consum_strada','')).upper()}</div>
                   <div class="clip">{str(row.get('consum_numar',''))}</div>
-                  <div class="clip">{status_display(row.get('status',''))}</div>
+                  <div class="clip">{format_status(row.get('status',''))}</div>
                   <div class="clip num">{val_contract:,.2f}</div>
                   <div class="clip num">{fact_html}</div>
                   <div class="clip num">{sold_html}</div>

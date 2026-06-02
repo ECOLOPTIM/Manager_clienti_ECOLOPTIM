@@ -19,6 +19,7 @@ from tabs.utils_documents import (
 )
 from tabs.utils_excel import render_excel_template
 from tabs.excel_mappings import SITUATIE_PLATA_BRANSAMENT_CONFIG
+from tabs.utils_status import format_status
 
 TIPURI_LUCRARE = [
     "Instalatie termica noua",
@@ -42,7 +43,7 @@ TIPURI_LUCRARE = [
     "Proiect IUGN",
     "Revizie IUGN",
 ]
-STATUS_OPTIONS = ["OFERTAT", "PROGRAMAT", "CONTRACTAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
+STATUS_OPTIONS = ["OFERTAT", "CONTRACTAT", "PROGRAMAT",  "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
 RESPONSABILI = ["", "Buruiana Gelu", "Enache Doru Lucian", "Bejan Marlena", "Nourescu Alexandra", "Poitasu Florinel"]
 PREFIX = "lucrari_client_"
 
@@ -63,6 +64,43 @@ TIPURI_CU_DATE_DGSR = [
     "Extindere retea cu bransament",
 ]
 
+TIPURI_CU_PIF = [
+    "Instalatie de utilizare noua",
+    "Suplimentare debit instalat",
+    "Bransament nou prin DGSR",
+    "Bransament nou cu OE client",
+    "Extindere retea",
+    "Extindere retea cu bransament",
+]
+
+STATUS_FLOW = ["OFERTAT", "CONTRACTAT", "PROGRAMAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
+
+
+def allowed_next_statuses(current_status: str):
+    s = str(current_status or "").strip().upper()
+    if s not in STATUS_FLOW:
+        return STATUS_FLOW
+
+    idx = STATUS_FLOW.index(s)
+    allowed = [STATUS_FLOW[idx]]
+    if idx - 1 >= 0:
+        allowed.insert(0, STATUS_FLOW[idx - 1])
+    if idx + 1 < len(STATUS_FLOW):
+        allowed.append(STATUS_FLOW[idx + 1])
+    return allowed
+
+
+def is_valid_status_transition(old_status: str, new_status: str) -> bool:
+    old_s = str(old_status or "").strip().upper()
+    new_s = str(new_status or "").strip().upper()
+
+    if old_s not in STATUS_FLOW or new_s not in STATUS_FLOW:
+        return True
+
+    old_idx = STATUS_FLOW.index(old_s)
+    new_idx = STATUS_FLOW.index(new_s)
+
+    return new_idx in {old_idx, old_idx - 1, old_idx + 1}
 
 def _ensure_nr_ordin_for_lucrare(lucrare_id: int) -> str:
     os_nr_key = f"{PREFIX}os_nr_{lucrare_id}"
@@ -145,14 +183,91 @@ def show(user, client_id):
 
     df = db.lista_lucrari_client(int(client_id))
 
+    st.markdown("<div class='eco-filters'>", unsafe_allow_html=True)
+    f1, f2, f3, f4, f5 = st.columns([2.2, 1.6, 2.2, 2.2, 1.2])
+
     tipuri_unice = sorted(df["tip_lucrare"].dropna().unique().tolist()) if not df.empty else []
-    tip_selectat = st.selectbox(
-        "Filtrează după tip lucrare",
+    status_order = ["OFERTAT", "CONTRACTAT", "PROGRAMAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
+    statusuri_existente = df["status"].dropna().astype(str).unique().tolist() if not df.empty else []
+    statusuri_unice = [s for s in status_order if s in statusuri_existente]
+    tip_selectat = f1.selectbox(
+        "Tip lucrare",
         ["Toate"] + tipuri_unice,
         key=f"{PREFIX}filtru_tip_{client_id}",
     )
+
+    status_selectat = f2.selectbox(
+        "Status",
+        ["Toate"] + statusuri_unice,
+        key=f"{PREFIX}filtru_status_{client_id}",
+    )
+
+    cautare = f3.text_input(
+        "Căutare",
+        placeholder="tip, observații, descriere, responsabil...",
+        key=f"{PREFIX}filtru_search_{client_id}",
+    )
+
+    sort_select = f4.selectbox(
+        "Sortare",
+        [
+            "Data contract ↓",
+            "Data contract ↑",
+            "Valoare ↓",
+            "Valoare ↑",
+            "Status A-Z",
+            "Tip lucrare A-Z",
+        ],
+        key=f"{PREFIX}sort_{client_id}",
+    )
+
+    reset_filters = f5.button("Reset", key=f"{PREFIX}reset_filters_{client_id}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if reset_filters:
+        for k in [
+            f"{PREFIX}filtru_tip_{client_id}",
+            f"{PREFIX}filtru_status_{client_id}",
+            f"{PREFIX}filtru_search_{client_id}",
+            f"{PREFIX}sort_{client_id}",
+        ]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
     if tip_selectat != "Toate" and not df.empty:
         df = df[df["tip_lucrare"] == tip_selectat]
+
+    if status_selectat != "Toate" and not df.empty:
+        df = df[df["status"] == status_selectat]
+
+    if cautare and not df.empty:
+        txt = cautare.strip().lower()
+        mask = df.apply(
+            lambda row: txt in " | ".join([
+                str(row.get("tip_lucrare", "")),
+                str(row.get("status", "")),
+                str(row.get("responsabil", "")),
+                str(row.get("observatii", "")),
+                str(row.get("descriere", "")),
+                str(row.get("echipa", "")),
+            ]).lower(),
+            axis=1,
+        )
+        df = df[mask]
+
+    if not df.empty:
+        if sort_select == "Data contract ↓":
+            df = df.sort_values(by="data_contract", ascending=False, na_position="last")
+        elif sort_select == "Data contract ↑":
+            df = df.sort_values(by="data_contract", ascending=True, na_position="last")
+        elif sort_select == "Valoare ↓":
+            df = df.sort_values(by="valoare_contractata", ascending=False, na_position="last")
+        elif sort_select == "Valoare ↑":
+            df = df.sort_values(by="valoare_contractata", ascending=True, na_position="last")
+        elif sort_select == "Status A-Z":
+            df = df.sort_values(by="status", ascending=True, na_position="last")
+        elif sort_select == "Tip lucrare A-Z":
+            df = df.sort_values(by="tip_lucrare", ascending=True, na_position="last")
 
     PAGE_SIZE = 10
     pagekey = f"{PREFIX}page_{client_id}"
@@ -175,7 +290,15 @@ def show(user, client_id):
         st.session_state[pagekey] = total_pages
     if st.session_state[pagekey] < 1:
         st.session_state[pagekey] = 1
+    if not df.empty:
+        total_lucrari = len(df)
+        total_valoare = float(df["valoare_contractata"].fillna(0).sum()) if "valoare_contractata" in df.columns else 0.0
+        total_finalizate = int((df["status"].astype(str).str.upper() == "FINALIZAT").sum()) if "status" in df.columns else 0
 
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Lucrări afișate", total_lucrari)
+        k2.metric("Valoare totală", f"{total_valoare:,.2f} RON")
+        k3.metric("Finalizate", total_finalizate)
     st.markdown("#### Toate lucrările acestui client")
     if df.empty:
         st.info("Nu există lucrări pentru acest client/filtru.")
@@ -183,37 +306,54 @@ def show(user, client_id):
         start, stop = (st.session_state[pagekey] - 1) * PAGE_SIZE, (st.session_state[pagekey]) * PAGE_SIZE
         df_page = df.iloc[start:stop]
 
-        head = st.columns([3, 2, 2, 2, 2, 2, 1, 1, 1])
-        header = ["TIP LUCRARE", "STATUS", "RESPONSABIL", "VALOARE (RON cu TVA)", "PERIOADĂ", "OBSERVAȚII", "📄", "✏️", "🗑️"]
+        head = st.columns([3, 2.2, 2, 2, 1.5, 1.5, 1.5, 2, 1, 1, 1])
+        header = [
+            "TIP LUCRARE",
+            "STATUS",
+            "RESPONSABIL",
+            "VALOARE (RON cu TVA)",
+            "DATA CONTRACT",
+            "DATA EXECUȚIE",
+            "DATA PIF",
+            "OBSERVAȚII",
+            "📄",
+            "✏️",
+            "🗑️",
+        ]
         for h, txt in zip(head, header):
-            h.write(f"**{txt}**")
+            h.markdown(f"**{txt}**")
 
         for _, row in df_page.iterrows():
-            c = st.columns([3, 2, 2, 2, 2, 2, 1, 1, 1])
+            c = st.columns([3, 2.2, 2, 2, 1.5, 1.5, 1.5, 2, 1, 1, 1])
+
             c[0].write(row["tip_lucrare"])
-            c[1].write(row["status"])
+
+            with c[1]:
+                st.write(format_status(row["status"]))
+
             c[2].write(row.get("responsabil", ""))
 
             val = row.get("valoare_contractata", "")
             val = f"{val:,.2f}" if pd.notnull(val) and val != "" else ""
             c[3].write(val)
 
-            perioada = ""
-            if pd.notnull(row.get("data_contract", "")):
-                perioada += str(row.get("data_contract", ""))
-            if pd.notnull(row.get("data_programare", "")):
-                perioada += " → " + str(row.get("data_programare", ""))
-            c[4].write(perioada)
+            data_contract = str(row.get("data_contract", "") or "").strip()
+            data_executie = str(row.get("data_programare", "") or "").strip()
+            data_pif = str(row.get("data_programare_pif", "") or "").strip()
 
-            c[5].write(row.get("observatii", ""))
+            c[4].write(data_contract)
+            c[5].write(data_executie)
+            c[6].write(data_pif)
 
-            if c[6].button("📄", key=f"{PREFIX}doc_{row['id']}"):
+            c[7].write(row.get("observatii", ""))
+
+            if c[8].button("📄", key=f"{PREFIX}doc_{row['id']}"):
                 st.session_state[f"{PREFIX}doc_lucrare_id_{client_id}"] = int(row["id"])
 
-            if c[7].button("✏️", key=f"{PREFIX}edit_{row['id']}"):
+            if c[9].button("✏️", key=f"{PREFIX}edit_{row['id']}"):
                 st.session_state[f"{PREFIX}edit_lucrare_id_{client_id}"] = int(row["id"])
 
-            if c[8].button("🗑️", key=f"{PREFIX}del_{row['id']}"):
+            if c[10].button("🗑️", key=f"{PREFIX}del_{row['id']}"):
                 st.session_state[f"{PREFIX}del_lucrare_id_{client_id}"] = int(row["id"])
 
     # --- DOCUMENTE LUCRARE + FLUX BIROU ---
@@ -876,49 +1016,173 @@ def show(user, client_id):
                 else:
                     st.info("Nu există documente atașate la această sarcină.")
 
-    # --- ADĂUGARE LUCRARE ---
+                     # --- ADĂUGARE LUCRARE ---
     if st.button("➕ Adaugă lucrare", key=f"{PREFIX}add_{client_id}"):
         st.session_state[f"{PREFIX}add_open_{client_id}"] = True
 
     if st.session_state.get(f"{PREFIX}add_open_{client_id}"):
-        with st.form(f"{PREFIX}form_add_{client_id}", clear_on_submit=True):
+        st.subheader("➕ Adăugare lucrare")
+
+        with st.form(f"{PREFIX}form_add_{client_id}", clear_on_submit=False):
             valori = {}
 
             r1 = st.columns([3, 2, 2])
-            valori["tip_lucrare"] = r1[0].selectbox("Tip lucrare", TIPURI_LUCRARE, key=f"{PREFIX}add_tip_{client_id}")
-            valori["status"] = r1[1].selectbox("Status", STATUS_OPTIONS, key=f"{PREFIX}add_status_{client_id}")
-            valori["responsabil"] = r1[2].selectbox("Responsabil", RESPONSABILI, key=f"{PREFIX}add_responsabil_{client_id}")
+            valori["tip_lucrare"] = r1[0].selectbox(
+                "Tip lucrare",
+                TIPURI_LUCRARE,
+                key=f"{PREFIX}add_tip_{client_id}"
+            )
+
+            status_add_options = ["OFERTAT", "CONTRACTAT"]
+            valori["status"] = r1[1].selectbox(
+                "Status",
+                status_add_options,
+                key=f"{PREFIX}add_status_{client_id}"
+            )
+
+            valori["responsabil"] = r1[2].selectbox(
+                "Responsabil",
+                RESPONSABILI,
+                key=f"{PREFIX}add_responsabil_{client_id}"
+            )
+
+            este_contractat = str(valori["status"]).strip().upper() == "CONTRACTAT"
+            este_programat = str(valori["status"]).strip().upper() == "PROGRAMAT"
+            este_executat = str(valori["status"]).strip().upper() == "EXECUTAT"
+            este_finalizat = str(valori["status"]).strip().upper() == "FINALIZAT"
+            este_inchis = str(valori["status"]).strip().upper() in ("ÎNCHIS", "INCHIS")
+            este_lucrare_cu_pif = valori["tip_lucrare"] in TIPURI_CU_PIF
+            poate_edita_pif = str(valori["status"]).strip().upper() in ("EXECUTAT", "FINALIZAT")
 
             r2 = st.columns(2)
-            valori["valoare_contractata"] = r2[0].number_input("Valoare (RON cu TVA)", min_value=0.0, step=100.0, key=f"{PREFIX}add_val_contract_{client_id}")
-            valori["avans"] = r2[1].number_input("Avans (RON)", min_value=0.0, step=100.0, key=f"{PREFIX}add_avans_{client_id}")
+            valori["valoare_contractata"] = r2[0].number_input(
+                "Valoare (RON cu TVA)",
+                min_value=0.0,
+                step=100.0,
+                key=f"{PREFIX}add_val_contract_{client_id}"
+            )
+            valori["avans"] = r2[1].number_input(
+                "Avans (RON)",
+                min_value=0.0,
+                step=100.0,
+                key=f"{PREFIX}add_avans_{client_id}"
+            )
 
             r3 = st.columns(2)
-            data_contract = r3[0].date_input("Dată contract", value=datetime.now().date(), key=f"{PREFIX}add_data_contract_{client_id}")
-            data_programare = r3[1].date_input("Dată programare", value=datetime.now().date(), key=f"{PREFIX}add_data_programare_{client_id}")
-            valori["data_contract"] = str(data_contract)
-            valori["data_programare"] = str(data_programare)
+            data_contract = r3[0].date_input(
+                "Dată contract",
+                value=datetime.now().date(),
+                key=f"{PREFIX}add_data_contract_{client_id}",
+                disabled=not este_contractat,
+            )
+            if not este_contractat:
+                r3[0].caption("Data contractului se completează doar când statusul este CONTRACTAT.")
+
+            data_programare = r3[1].date_input(
+                "Dată programare execuție",
+                value=datetime.now().date(),
+                key=f"{PREFIX}add_data_programare_{client_id}",
+                disabled=not este_programat,
+            )
+            if not este_programat:
+                r3[1].caption("Programarea execuției devine disponibilă doar când statusul este PROGRAMAT.")
+
+            valori["data_contract"] = str(data_contract) if este_contractat else ""
+            valori["data_programare"] = str(data_programare) if este_programat else ""
 
             r4 = st.columns([2, 3, 2])
-            valori["interval_orar"] = r4[0].text_input("Interval orar", placeholder="08:00-12:00", key=f"{PREFIX}add_interval_{client_id}")
+
+            interval_orar = r4[0].text_input(
+                "Interval orar execuție",
+                placeholder="08:00-12:00",
+                key=f"{PREFIX}add_interval_{client_id}",
+                disabled=not este_programat,
+            )
+            if not este_programat:
+                r4[0].caption("Intervalul execuției devine disponibil doar când statusul este PROGRAMAT.")
+            valori["interval_orar"] = interval_orar if este_programat else ""
 
             echipa_sel = r4[1].multiselect(
-                "Echipă executantă",
+                "Echipă execuție",
                 options=MUNCITORI,
                 default=[],
                 key=f"{PREFIX}add_echipa_{client_id}",
+                disabled=not este_programat,
             )
-            valori["echipa"] = join_team(echipa_sel)
+            if not este_programat:
+                r4[1].caption("Echipa de execuție devine disponibilă doar când statusul este PROGRAMAT.")
+            valori["echipa"] = join_team(echipa_sel) if este_programat else ""
 
-            valori["sef_echipa"] = r4[2].selectbox(
-                "Șef de echipă",
+            sef_echipa_sel = r4[2].selectbox(
+                "Șef de echipă execuție",
                 options=[""] + MUNCITORI,
                 index=0,
                 key=f"{PREFIX}add_sef_{client_id}",
+                disabled=not este_programat,
             )
+            if not este_programat:
+                r4[2].caption("Șeful de echipă execuție devine disponibil doar când statusul este PROGRAMAT.")
+            valori["sef_echipa"] = sef_echipa_sel if este_programat else ""
+
+            if este_lucrare_cu_pif:
+                st.markdown("### Programare PIF")
+
+                rpif = st.columns([2, 2, 3, 2])
+
+                data_programare_pif = rpif[0].date_input(
+                    "Dată programare PIF",
+                    value=datetime.now().date(),
+                    key=f"{PREFIX}add_data_programare_pif_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[0].caption("Programarea PIF devine disponibilă după EXECUTAT.")
+
+                interval_orar_pif = rpif[1].text_input(
+                    "Interval orar PIF",
+                    placeholder="08:00-12:00",
+                    key=f"{PREFIX}add_interval_pif_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[1].caption("Intervalul PIF devine disponibil după EXECUTAT.")
+
+                echipa_pif_sel = rpif[2].multiselect(
+                    "Echipă PIF",
+                    options=MUNCITORI,
+                    default=[],
+                    key=f"{PREFIX}add_echipa_pif_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[2].caption("Echipa PIF devine disponibilă după EXECUTAT.")
+
+                sef_echipa_pif_sel = rpif[3].selectbox(
+                    "Șef de echipă PIF",
+                    options=[""] + MUNCITORI,
+                    index=0,
+                    key=f"{PREFIX}add_sef_pif_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[3].caption("Șeful de echipă PIF devine disponibil după EXECUTAT.")
+
+                valori["data_programare_pif"] = str(data_programare_pif) if poate_edita_pif else ""
+                valori["interval_orar_pif"] = interval_orar_pif if poate_edita_pif else ""
+                valori["echipa_pif"] = join_team(echipa_pif_sel) if poate_edita_pif else ""
+                valori["sef_echipa_pif"] = sef_echipa_pif_sel if poate_edita_pif else ""
+            else:
+                valori["data_programare_pif"] = ""
+                valori["interval_orar_pif"] = ""
+                valori["echipa_pif"] = ""
+                valori["sef_echipa_pif"] = ""
 
             st.markdown("### Adresă lucrare (obligatoriu)")
-            copy = st.checkbox("Copiază automat din 'Loc consum' al clientului", value=True, key=f"{PREFIX}add_copy_consum_{client_id}")
+            copy = st.checkbox(
+                "Copiază automat din 'Loc consum' al clientului",
+                value=True,
+                key=f"{PREFIX}add_copy_consum_{client_id}"
+            )
 
             defv = lambda k: safe_str(client.get(k)) if copy else ""
             rAdr = st.columns([1, 2, 3, 1, 1, 1])
@@ -931,7 +1195,6 @@ def show(user, client_id):
 
             if valori["tip_lucrare"] in TIPURI_CU_DATE_DGSR:
                 st.markdown("### Date fixe DGSR / extindere")
-
                 d1, d2 = st.columns(2)
                 valori["cod_atr"] = d1.text_input("Cod ATR", key=f"{PREFIX}add_cod_atr_{client_id}")
                 valori["executant"] = d2.text_input("Executant", value="ECOLOPTIM S.R.L.", key=f"{PREFIX}add_executant_{client_id}")
@@ -958,7 +1221,16 @@ def show(user, client_id):
             valori["observatii"] = st.text_area("Observații", key=f"{PREFIX}add_obs_{client_id}", height=90)
             valori["descriere"] = st.text_area("Descriere lucrare", key=f"{PREFIX}add_descriere_{client_id}", height=90)
 
-            submit = st.form_submit_button("Salvează lucrarea", key=f"{PREFIX}submit_add_{client_id}")
+            b1, b2, _ = st.columns([1.3, 1.3, 6])
+            with b1:
+                submit = st.form_submit_button("💾 Salvează lucrarea", use_container_width=True)
+            with b2:
+                cancel = st.form_submit_button("⛔ Renunță", use_container_width=True)
+
+            if cancel:
+                st.session_state[f"{PREFIX}add_open_{client_id}"] = False
+                st.rerun()
+
             if submit:
                 required = [
                     ("Județ", valori.get("adresa_judet")),
@@ -967,28 +1239,64 @@ def show(user, client_id):
                     ("Număr", valori.get("adresa_numar")),
                 ]
                 missing = [label for label, v in required if not str(v or "").strip()]
-                if missing:
+
+                status_upper = str(valori.get("status") or "").strip().upper()
+                data_contract_val = str(valori.get("data_contract") or "").strip()
+                data_programare_val = str(valori.get("data_programare") or "").strip()
+                interval_val = str(valori.get("interval_orar") or "").strip()
+                echipa_val = str(valori.get("echipa") or "").strip()
+                sef_val = str(valori.get("sef_echipa") or "").strip()
+                data_programare_pif_val = str(valori.get("data_programare_pif") or "").strip()
+                interval_pif_val = str(valori.get("interval_orar_pif") or "").strip()
+                echipa_pif_val = str(valori.get("echipa_pif") or "").strip()
+                sef_pif_val = str(valori.get("sef_echipa_pif") or "").strip()
+
+                if not str(valori.get("tip_lucrare") or "").strip():
+                    st.error("Completează tipul lucrării.")
+                elif status_upper not in ("OFERTAT", "CONTRACTAT"):
+                    st.error("La adăugare, o lucrare nouă poate porni doar din status OFERTAT sau CONTRACTAT.")
+                elif missing:
                     st.error("Completează câmpurile obligatorii la Adresă lucrare: " + ", ".join(missing))
-                    st.stop()
+                elif float(valori.get("avans", 0) or 0) > float(valori.get("valoare_contractata", 0) or 0):
+                    st.error("Avansul nu poate fi mai mare decât valoarea contractată.")
+                elif status_upper == "CONTRACTAT" and not data_contract_val:
+                    st.error("Completează data contractului când statusul este CONTRACTAT.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not data_programare_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără dată programare PIF.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not interval_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără interval orar PIF.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not echipa_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără echipă PIF.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not sef_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără șef de echipă PIF.")
+                else:
+                    sef = (valori.get("sef_echipa") or "").strip()
+                    team = split_team(valori.get("echipa"))
+                    if sef and sef not in team:
+                        team.append(sef)
+                        valori["echipa"] = join_team(team)
 
-                sef = (valori.get("sef_echipa") or "").strip()
-                team = split_team(valori.get("echipa"))
-                if sef and sef not in team:
-                    team.append(sef)
-                    valori["echipa"] = join_team(team)
+                    sef_pif = (valori.get("sef_echipa_pif") or "").strip()
+                    team_pif = split_team(valori.get("echipa_pif"))
+                    if sef_pif and sef_pif not in team_pif:
+                        team_pif.append(sef_pif)
+                        valori["echipa_pif"] = join_team(team_pif)
 
-                valori["client_id"] = int(client_id)
-                valori["created_by"] = user
-                db.adauga_lucrare(valori)
-                st.success("Lucrare adăugată cu succes!")
-                st.session_state[f"{PREFIX}add_open_{client_id}"] = False
-                st.rerun()
+                    valori["client_id"] = int(client_id)
+                    valori["created_by"] = user
+
+                    db.adauga_lucrare(valori)
+                    st.success("Lucrare adăugată cu succes!")
+                    st.session_state[f"{PREFIX}add_open_{client_id}"] = False
+                    st.rerun()
 
     # --- EDITARE LUCRARE ---
     edit_key = f"{PREFIX}edit_lucrare_id_{client_id}"
     if st.session_state.get(edit_key):
         lucrare_id = int(st.session_state[edit_key])
         row = df[df["id"] == lucrare_id].iloc[0]
+
+        st.subheader(f"✏️ Editare lucrare — {safe_str(row.get('tip_lucrare'))}")
 
         with st.form(f"{PREFIX}form_edit_{lucrare_id}_{client_id}", clear_on_submit=False):
             valori = {}
@@ -1000,12 +1308,17 @@ def show(user, client_id):
                 index=TIPURI_LUCRARE.index(row["tip_lucrare"]) if row["tip_lucrare"] in TIPURI_LUCRARE else 0,
                 key=f"{PREFIX}edit_tip_{lucrare_id}_{client_id}",
             )
+
+            status_curent_db = str(row.get("status") or "").strip().upper()
+            status_edit_options = allowed_next_statuses(status_curent_db)
+
             valori["status"] = r1[1].selectbox(
                 "Status",
-                STATUS_OPTIONS,
-                index=STATUS_OPTIONS.index(row["status"]) if row["status"] in STATUS_OPTIONS else 0,
+                status_edit_options,
+                index=status_edit_options.index(status_curent_db) if status_curent_db in status_edit_options else 0,
                 key=f"{PREFIX}edit_status_{lucrare_id}_{client_id}",
             )
+
             valori["responsabil"] = r1[2].selectbox(
                 "Responsabil",
                 RESPONSABILI,
@@ -1013,6 +1326,12 @@ def show(user, client_id):
                 if row.get("responsabil", RESPONSABILI[0]) in RESPONSABILI else 0,
                 key=f"{PREFIX}edit_responsabil_{lucrare_id}_{client_id}",
             )
+
+            status_curent = str(valori.get("status") or "").strip().upper()
+            este_contractat = status_curent == "CONTRACTAT"
+            este_programat = status_curent == "PROGRAMAT"
+            este_lucrare_cu_pif = valori["tip_lucrare"] in TIPURI_CU_PIF
+            poate_edita_pif = status_curent in ("EXECUTAT", "FINALIZAT")
 
             r2 = st.columns(2)
             valori["valoare_contractata"] = r2[0].number_input(
@@ -1034,25 +1353,53 @@ def show(user, client_id):
             data_contract = r3[0].date_input(
                 "Dată contract",
                 value=pd.to_datetime(row["data_contract"]).date()
-                if pd.notnull(row.get("data_contract")) else datetime.now().date(),
+                if pd.notnull(row.get("data_contract")) and str(row.get("data_contract")).strip()
+                else datetime.now().date(),
                 key=f"{PREFIX}edit_data_contract_{lucrare_id}_{client_id}",
+                disabled=not este_contractat,
             )
+            if not este_contractat:
+                r3[0].caption("Data contractului se completează doar când statusul este CONTRACTAT.")
+
+            data_programare_initiala = (
+                pd.to_datetime(row["data_programare"]).date()
+                if pd.notnull(row.get("data_programare")) and str(row.get("data_programare")).strip()
+                else datetime.now().date()
+            )
+
             data_programare = r3[1].date_input(
-                "Dată programare",
-                value=pd.to_datetime(row["data_programare"]).date()
-                if pd.notnull(row.get("data_programare")) else datetime.now().date(),
+                "Dată programare execuție",
+                value=data_programare_initiala,
                 key=f"{PREFIX}edit_data_programare_{lucrare_id}_{client_id}",
+                disabled=not este_programat,
             )
-            valori["data_contract"] = str(data_contract)
-            valori["data_programare"] = str(data_programare)
+            if not este_programat:
+                r3[1].caption("Programarea execuției devine disponibilă doar când statusul este PROGRAMAT.")
+
+            valori["data_contract"] = (
+                str(data_contract)
+                if este_contractat
+                else safe_str(row.get("data_contract"))
+            )
+
+            valori["data_programare"] = (
+                str(data_programare)
+                if este_programat
+                else safe_str(row.get("data_programare"))
+            )
 
             r4 = st.columns([2, 3, 2])
-            valori["interval_orar"] = r4[0].text_input(
-                "Interval orar",
+
+            interval_orar = r4[0].text_input(
+                "Interval orar execuție",
                 value=safe_str(row.get("interval_orar")),
                 placeholder="08:00-12:00",
                 key=f"{PREFIX}edit_interval_{lucrare_id}_{client_id}",
+                disabled=not este_programat,
             )
+            if not este_programat:
+                r4[0].caption("Intervalul execuției devine disponibil doar când statusul este PROGRAMAT.")
+            valori["interval_orar"] = interval_orar if este_programat else safe_str(row.get("interval_orar"))
 
             echipa_curenta = split_team(row.get("echipa"))
             opts = list(MUNCITORI)
@@ -1061,24 +1408,102 @@ def show(user, client_id):
                     opts = [x] + opts
 
             echipa_sel = r4[1].multiselect(
-                "Echipă executantă",
+                "Echipă execuție",
                 options=opts,
                 default=[x for x in echipa_curenta if x in opts],
                 key=f"{PREFIX}edit_echipa_{lucrare_id}_{client_id}",
+                disabled=not este_programat,
             )
-            valori["echipa"] = join_team(echipa_sel)
+            if not este_programat:
+                r4[1].caption("Echipa de execuție devine disponibilă doar când statusul este PROGRAMAT.")
+            valori["echipa"] = join_team(echipa_sel) if este_programat else safe_str(row.get("echipa"))
 
             sef_curent = safe_str(row.get("sef_echipa")).strip()
             sef_opts = [""] + list(MUNCITORI)
             if sef_curent and sef_curent not in sef_opts:
                 sef_opts = [sef_curent] + sef_opts
 
-            valori["sef_echipa"] = r4[2].selectbox(
-                "Șef de echipă",
+            sef_echipa_sel = r4[2].selectbox(
+                "Șef de echipă execuție",
                 options=sef_opts,
                 index=sef_opts.index(sef_curent) if sef_curent in sef_opts else 0,
                 key=f"{PREFIX}edit_sef_{lucrare_id}_{client_id}",
+                disabled=not este_programat,
             )
+            if not este_programat:
+                r4[2].caption("Șeful de echipă execuție devine disponibil doar când statusul este PROGRAMAT.")
+            valori["sef_echipa"] = sef_echipa_sel if este_programat else safe_str(row.get("sef_echipa"))
+
+            if este_lucrare_cu_pif:
+                st.markdown("### Programare PIF")
+
+                data_programare_pif_initiala = (
+                    pd.to_datetime(row["data_programare_pif"]).date()
+                    if pd.notnull(row.get("data_programare_pif")) and str(row.get("data_programare_pif")).strip()
+                    else datetime.now().date()
+                )
+
+                rpif = st.columns([2, 2, 3, 2])
+
+                data_programare_pif = rpif[0].date_input(
+                    "Dată programare PIF",
+                    value=data_programare_pif_initiala,
+                    key=f"{PREFIX}edit_data_programare_pif_{lucrare_id}_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[0].caption("Programarea PIF devine disponibilă după EXECUTAT.")
+
+                interval_orar_pif = rpif[1].text_input(
+                    "Interval orar PIF",
+                    value=safe_str(row.get("interval_orar_pif")),
+                    placeholder="08:00-12:00",
+                    key=f"{PREFIX}edit_interval_pif_{lucrare_id}_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[1].caption("Intervalul PIF devine disponibil după EXECUTAT.")
+
+                echipa_pif_curenta = split_team(row.get("echipa_pif"))
+                opts_pif = list(MUNCITORI)
+                for x in echipa_pif_curenta:
+                    if x and x not in opts_pif:
+                        opts_pif = [x] + opts_pif
+
+                echipa_pif_sel = rpif[2].multiselect(
+                    "Echipă PIF",
+                    options=opts_pif,
+                    default=[x for x in echipa_pif_curenta if x in opts_pif],
+                    key=f"{PREFIX}edit_echipa_pif_{lucrare_id}_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[2].caption("Echipa PIF devine disponibilă după EXECUTAT.")
+
+                sef_pif_curent = safe_str(row.get("sef_echipa_pif")).strip()
+                sef_pif_opts = [""] + list(MUNCITORI)
+                if sef_pif_curent and sef_pif_curent not in sef_pif_opts:
+                    sef_pif_opts = [sef_pif_curent] + sef_pif_opts
+
+                sef_echipa_pif_sel = rpif[3].selectbox(
+                    "Șef de echipă PIF",
+                    options=sef_pif_opts,
+                    index=sef_pif_opts.index(sef_pif_curent) if sef_pif_curent in sef_pif_opts else 0,
+                    key=f"{PREFIX}edit_sef_pif_{lucrare_id}_{client_id}",
+                    disabled=not poate_edita_pif,
+                )
+                if not poate_edita_pif:
+                    rpif[3].caption("Șeful de echipă PIF devine disponibil după EXECUTAT.")
+
+                valori["data_programare_pif"] = str(data_programare_pif) if poate_edita_pif else safe_str(row.get("data_programare_pif"))
+                valori["interval_orar_pif"] = interval_orar_pif if poate_edita_pif else safe_str(row.get("interval_orar_pif"))
+                valori["echipa_pif"] = join_team(echipa_pif_sel) if poate_edita_pif else safe_str(row.get("echipa_pif"))
+                valori["sef_echipa_pif"] = sef_echipa_pif_sel if poate_edita_pif else safe_str(row.get("sef_echipa_pif"))
+            else:
+                valori["data_programare_pif"] = ""
+                valori["interval_orar_pif"] = ""
+                valori["echipa_pif"] = ""
+                valori["sef_echipa_pif"] = ""
 
             st.markdown("### Adresă lucrare (obligatoriu)")
             rAdr = st.columns([1, 2, 3, 1, 1, 1])
@@ -1091,49 +1516,20 @@ def show(user, client_id):
 
             if valori["tip_lucrare"] in TIPURI_CU_DATE_DGSR:
                 st.markdown("### Date fixe DGSR / extindere")
-
                 d1, d2 = st.columns(2)
-                valori["cod_atr"] = d1.text_input(
-                    "Cod ATR",
-                    value=safe_str(row.get("cod_atr")),
-                    key=f"{PREFIX}edit_cod_atr_{lucrare_id}_{client_id}",
-                )
-                valori["executant"] = d2.text_input(
-                    "Executant",
-                    value=safe_str(row.get("executant")) or "ECOLOPTIM S.R.L.",
-                    key=f"{PREFIX}edit_executant_{lucrare_id}_{client_id}",
-                )
+                valori["cod_atr"] = d1.text_input("Cod ATR", value=safe_str(row.get("cod_atr")), key=f"{PREFIX}edit_cod_atr_{lucrare_id}_{client_id}")
+                valori["executant"] = d2.text_input("Executant", value=safe_str(row.get("executant")) or "ECOLOPTIM S.R.L.", key=f"{PREFIX}edit_executant_{lucrare_id}_{client_id}")
 
                 d3, d4 = st.columns(2)
-                valori["element_sda"] = d3.text_input(
-                    "Element SDA",
-                    value=safe_str(row.get("element_sda")),
-                    key=f"{PREFIX}edit_element_sda_{lucrare_id}_{client_id}",
-                )
-                valori["comanda_aprovizionare"] = d4.text_input(
-                    "Comandă aprovizionare",
-                    value=safe_str(row.get("comanda_aprovizionare")),
-                    key=f"{PREFIX}edit_cmd_aprov_{lucrare_id}_{client_id}",
-                )
+                valori["element_sda"] = d3.text_input("Element SDA", value=safe_str(row.get("element_sda")), key=f"{PREFIX}edit_element_sda_{lucrare_id}_{client_id}")
+                valori["comanda_aprovizionare"] = d4.text_input("Comandă aprovizionare", value=safe_str(row.get("comanda_aprovizionare")), key=f"{PREFIX}edit_cmd_aprov_{lucrare_id}_{client_id}")
 
                 d5, d6 = st.columns(2)
-                valori["diriginte_santier"] = d5.text_input(
-                    "Diriginte de șantier",
-                    value=safe_str(row.get("diriginte_santier")),
-                    key=f"{PREFIX}edit_diriginte_{lucrare_id}_{client_id}",
-                )
-                valori["contract_prestari_servicii"] = d6.text_input(
-                    "Nr. contract prestări servicii",
-                    value=safe_str(row.get("contract_prestari_servicii")),
-                    key=f"{PREFIX}edit_contract_ps_{lucrare_id}_{client_id}",
-                )
+                valori["diriginte_santier"] = d5.text_input("Diriginte de șantier", value=safe_str(row.get("diriginte_santier")), key=f"{PREFIX}edit_diriginte_{lucrare_id}_{client_id}")
+                valori["contract_prestari_servicii"] = d6.text_input("Nr. contract prestări servicii", value=safe_str(row.get("contract_prestari_servicii")), key=f"{PREFIX}edit_contract_ps_{lucrare_id}_{client_id}")
 
                 d7, _ = st.columns(2)
-                valori["numar_conventie_tehnica"] = d7.text_input(
-                    "Număr convenție tehnică",
-                    value=safe_str(row.get("numar_conventie_tehnica")),
-                    key=f"{PREFIX}edit_conv_tehnica_{lucrare_id}_{client_id}",
-                )
+                valori["numar_conventie_tehnica"] = d7.text_input("Număr convenție tehnică", value=safe_str(row.get("numar_conventie_tehnica")), key=f"{PREFIX}edit_conv_tehnica_{lucrare_id}_{client_id}")
             else:
                 valori["cod_atr"] = ""
                 valori["executant"] = ""
@@ -1143,21 +1539,20 @@ def show(user, client_id):
                 valori["contract_prestari_servicii"] = ""
                 valori["numar_conventie_tehnica"] = ""
 
-            valori["observatii"] = st.text_area(
-                "Observații",
-                value=safe_str(row.get("observatii")),
-                key=f"{PREFIX}edit_obs_{lucrare_id}_{client_id}",
-                height=90,
-            )
-            valori["descriere"] = st.text_area(
-                "Descriere lucrare",
-                value=safe_str(row.get("descriere")),
-                key=f"{PREFIX}edit_descriere_{lucrare_id}_{client_id}",
-                height=90,
-            )
+            valori["observatii"] = st.text_area("Observații", value=safe_str(row.get("observatii")), key=f"{PREFIX}edit_obs_{lucrare_id}_{client_id}", height=90)
+            valori["descriere"] = st.text_area("Descriere lucrare", value=safe_str(row.get("descriere")), key=f"{PREFIX}edit_descriere_{lucrare_id}_{client_id}", height=90)
 
-            submit = st.form_submit_button("Salvează modificările", key=f"{PREFIX}submit_edit_{lucrare_id}_{client_id}")
+            b1, b2, _ = st.columns([1.3, 1.3, 6])
+            with b1:
+                submit = st.form_submit_button("💾 Salvează modificările", use_container_width=True)
+            with b2:
+                cancel = st.form_submit_button("⛔ Închide editarea", use_container_width=True)
+
             valori["client_id"] = int(client_id)
+
+            if cancel:
+                del st.session_state[edit_key]
+                st.rerun()
 
             if submit:
                 required = [
@@ -1167,40 +1562,132 @@ def show(user, client_id):
                     ("Număr", valori.get("adresa_numar")),
                 ]
                 missing = [label for label, v in required if not str(v or "").strip()]
-                if missing:
+
+                status_vechi = str(row.get("status") or "").strip().upper()
+                status_upper = str(valori.get("status") or "").strip().upper()
+
+                data_contract_val = str(valori.get("data_contract") or "").strip()
+                data_programare_val = str(valori.get("data_programare") or "").strip()
+                interval_val = str(valori.get("interval_orar") or "").strip()
+                echipa_val = str(valori.get("echipa") or "").strip()
+                sef_val = str(valori.get("sef_echipa") or "").strip()
+                data_programare_pif_val = str(valori.get("data_programare_pif") or "").strip()
+                interval_pif_val = str(valori.get("interval_orar_pif") or "").strip()
+                echipa_pif_val = str(valori.get("echipa_pif") or "").strip()
+                sef_pif_val = str(valori.get("sef_echipa_pif") or "").strip()
+
+                if not is_valid_status_transition(status_vechi, status_upper):
+                    st.error(f"Tranziție invalidă de status: {status_vechi} → {status_upper}. Poți merge doar un pas înainte sau un pas înapoi.")
+                elif not str(valori.get("tip_lucrare") or "").strip():
+                    st.error("Completează tipul lucrării.")
+                elif missing:
                     st.error("Completează câmpurile obligatorii la Adresă lucrare: " + ", ".join(missing))
-                    st.stop()
+                elif float(valori.get("avans", 0) or 0) > float(valori.get("valoare_contractata", 0) or 0):
+                    st.error("Avansul nu poate fi mai mare decât valoarea contractată.")
+                elif status_upper == "CONTRACTAT" and not data_contract_val:
+                    st.error("Completează data contractului când statusul este CONTRACTAT.")
+                elif status_upper == "PROGRAMAT" and not data_contract_val:
+                    st.error("Nu poți programa lucrarea fără dată contract.")
+                elif status_upper == "PROGRAMAT" and not data_programare_val:
+                    st.error("Completează data programării când statusul este PROGRAMAT.")
+                elif status_upper == "PROGRAMAT" and not interval_val:
+                    st.error("Completează intervalul orar când statusul este PROGRAMAT.")
+                elif status_upper == "PROGRAMAT" and not echipa_val:
+                    st.error("Selectează echipa de lucru când statusul este PROGRAMAT.")
+                elif status_upper == "PROGRAMAT" and not sef_val:
+                    st.error("Selectează șeful de echipă când statusul este PROGRAMAT.")
+                elif status_upper == "EXECUTAT" and not data_programare_val:
+                    st.error("Nu poți seta statusul EXECUTAT fără dată programare.")
+                elif status_upper == "EXECUTAT" and not interval_val:
+                    st.error("Nu poți seta statusul EXECUTAT fără interval orar.")
+                elif status_upper == "EXECUTAT" and not echipa_val:
+                    st.error("Nu poți seta statusul EXECUTAT fără echipă de lucru.")
+                elif status_upper == "EXECUTAT" and not sef_val:
+                    st.error("Nu poți seta statusul EXECUTAT fără șef de echipă.")
+                elif status_upper == "FINALIZAT" and not data_contract_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără dată contract.")
+                elif status_upper == "FINALIZAT" and not data_programare_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără dată programare.")
+                elif status_upper == "FINALIZAT" and not interval_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără interval orar.")
+                elif status_upper == "FINALIZAT" and not echipa_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără echipă de lucru.")
+                elif status_upper == "FINALIZAT" and not sef_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără șef de echipă.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not data_programare_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără dată programare PIF.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not interval_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără interval orar PIF.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not echipa_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără echipă PIF.")
+                elif status_upper == "FINALIZAT" and este_lucrare_cu_pif and not sef_pif_val:
+                    st.error("Nu poți seta statusul FINALIZAT fără șef de echipă PIF.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and not data_contract_val:
+                    st.error("Nu poți închide lucrarea fără dată contract.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and not data_programare_val:
+                    st.error("Nu poți închide lucrarea fără dată programare.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and not interval_val:
+                    st.error("Nu poți închide lucrarea fără interval orar.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and not echipa_val:
+                    st.error("Nu poți închide lucrarea fără echipă de lucru.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and not sef_val:
+                    st.error("Nu poți închide lucrarea fără șef de echipă.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and este_lucrare_cu_pif and not data_programare_pif_val:
+                    st.error("Nu poți închide lucrarea fără dată programare PIF.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and este_lucrare_cu_pif and not interval_pif_val:
+                    st.error("Nu poți închide lucrarea fără interval orar PIF.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and este_lucrare_cu_pif and not echipa_pif_val:
+                    st.error("Nu poți închide lucrarea fără echipă PIF.")
+                elif status_upper in ("ÎNCHIS", "INCHIS") and este_lucrare_cu_pif and not sef_pif_val:
+                    st.error("Nu poți închide lucrarea fără șef de echipă PIF.")
+                else:
+                    sef = (valori.get("sef_echipa") or "").strip()
+                    team = split_team(valori.get("echipa"))
+                    if sef and sef not in team:
+                        team.append(sef)
+                        valori["echipa"] = join_team(team)
 
-                sef = (valori.get("sef_echipa") or "").strip()
-                team = split_team(valori.get("echipa"))
-                if sef and sef not in team:
-                    team.append(sef)
-                    valori["echipa"] = join_team(team)
+                    sef_pif = (valori.get("sef_echipa_pif") or "").strip()
+                    team_pif = split_team(valori.get("echipa_pif"))
+                    if sef_pif and sef_pif not in team_pif:
+                        team_pif.append(sef_pif)
+                        valori["echipa_pif"] = join_team(team_pif)
 
-                db.modifica_lucrare(lucrare_id, valori)
-                st.success("Modificare salvată.")
-                del st.session_state[edit_key]
-                st.rerun()
+                    db.modifica_lucrare(lucrare_id, valori)
+                    st.success("Modificare salvată.")
+                    del st.session_state[edit_key]
+                    st.rerun()
 
-        if st.button("⛔ Închide editarea", key=f"{PREFIX}close_edit_{lucrare_id}_{client_id}"):
-            del st.session_state[edit_key]
-            st.rerun()
-
-    # --- ȘTERGERE LUCRARE ---
+        # --- ȘTERGERE LUCRARE ---
     del_key = f"{PREFIX}del_lucrare_id_{client_id}"
     if st.session_state.get(del_key):
         lucrare_id = int(st.session_state[del_key])
         row = df[df["id"] == lucrare_id].iloc[0]
+
+        st.subheader("🗑️ Ștergere lucrare")
         st.error(
             f"EȘTI SIGUR CĂ VREI SĂ ȘTERGI LUCRAREA '{row['tip_lucrare']}' "
             f"({row['data_contract']} → {row['data_programare']})?"
         )
+
+        deps = db.dependinte_lucrare(lucrare_id)
+        if any(int(v or 0) > 0 for v in deps.values()):
+            st.warning(
+                "Această lucrare are date asociate și nu poate fi ștearsă direct: "
+                + ", ".join(f"{k}: {v}" for k, v in deps.items() if int(v or 0) > 0)
+            )
+
         conf, canc = st.columns([1, 1])
+
         if conf.button("Confirmă ștergerea", key=f"{PREFIX}conf_del_{lucrare_id}_{client_id}"):
-            db.sterge_lucrare(lucrare_id)
-            st.success("Lucrare ștearsă!")
-            del st.session_state[del_key]
-            st.rerun()
+            try:
+                db.sterge_lucrare(lucrare_id)
+                st.success("Lucrare ștearsă!")
+                del st.session_state[del_key]
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
+
         if canc.button("Anulează", key=f"{PREFIX}cancel_del_{lucrare_id}_{client_id}"):
             del st.session_state[del_key]
             st.rerun()

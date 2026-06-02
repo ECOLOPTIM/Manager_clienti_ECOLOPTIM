@@ -33,7 +33,6 @@ def verify_password(password: str, stored_value: str) -> bool:
     if not stored_value:
         return False
 
-    # compatibilitate cu parole vechi stocate în clar
     if not stored_value.startswith("pbkdf2_sha256$"):
         return hmac.compare_digest(password, stored_value)
 
@@ -50,8 +49,6 @@ def verify_password(password: str, stored_value: str) -> bool:
     except Exception:
         return False
 
-
-# ---------------- Helpers / Migrare ----------------
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set:
     cur = conn.cursor()
@@ -70,7 +67,6 @@ def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, col_name: 
 def _migrate_schema(conn: sqlite3.Connection):
     cur = conn.cursor()
 
-    # OS seq per an
     cur.execute("""
         CREATE TABLE IF NOT EXISTS documente_seq (
             an INTEGER PRIMARY KEY,
@@ -78,7 +74,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         )
     """)
 
-    # Contracte seq per an (CTR-YYYY-0001)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS contracte_seq (
             an INTEGER PRIMARY KEY,
@@ -86,7 +81,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         )
     """)
 
-    # Registru seq per client
     cur.execute("""
         CREATE TABLE IF NOT EXISTS registru_seq_client (
             client_id INTEGER PRIMARY KEY,
@@ -94,7 +88,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         )
     """)
 
-    # Sarcini flux birou
     cur.execute("""
         CREATE TABLE IF NOT EXISTS sarcini (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,7 +105,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         )
     """)
 
-    # Inregistrari (nr registru)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS inregistrari (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +119,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         )
     """)
 
-    # Lucrari: schema extinsă
     _add_column_if_missing(conn, "lucrari", "adresa_judet", "TEXT")
     _add_column_if_missing(conn, "lucrari", "adresa_localitate", "TEXT")
     _add_column_if_missing(conn, "lucrari", "adresa_strada", "TEXT")
@@ -146,22 +137,22 @@ def _migrate_schema(conn: sqlite3.Connection):
     _add_column_if_missing(conn, "lucrari", "contract_prestari_servicii", "TEXT")
     _add_column_if_missing(conn, "lucrari", "numar_conventie_tehnica", "TEXT")
 
-    # Atasamente: legare la lucrare/sarcina
+    _add_column_if_missing(conn, "lucrari", "data_programare_pif", "TEXT")
+    _add_column_if_missing(conn, "lucrari", "interval_orar_pif", "TEXT")
+    _add_column_if_missing(conn, "lucrari", "echipa_pif", "TEXT")
+    _add_column_if_missing(conn, "lucrari", "sef_echipa_pif", "TEXT")
+
     _add_column_if_missing(conn, "atasamente", "lucrare_id", "INTEGER")
     _add_column_if_missing(conn, "atasamente", "sarcina_id", "INTEGER")
 
-    # Clienti: date acte (pentru contracte)
     _add_column_if_missing(conn, "clienti", "cnp", "TEXT")
     _add_column_if_missing(conn, "clienti", "ci_serie", "TEXT")
     _add_column_if_missing(conn, "clienti", "ci_numar", "TEXT")
     _add_column_if_missing(conn, "clienti", "ci_emitent", "TEXT")
     _add_column_if_missing(conn, "clienti", "ci_data", "TEXT")
-
-    # Clienti: domiciliu scara/etaj (pentru mandat)
     _add_column_if_missing(conn, "clienti", "domiciliu_scara", "TEXT")
     _add_column_if_missing(conn, "clienti", "domiciliu_etaj", "TEXT")
 
-        # Utilizatori: roluri / activare / schimbare parolă
     _add_column_if_missing(conn, "utilizatori", "rol", "TEXT")
     _add_column_if_missing(conn, "utilizatori", "activ", "INTEGER DEFAULT 1")
     _add_column_if_missing(conn, "utilizatori", "must_change_password", "INTEGER DEFAULT 0")
@@ -181,7 +172,6 @@ def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
 
-        # utilizatori
         c.execute("""
             CREATE TABLE IF NOT EXISTS utilizatori (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,7 +184,6 @@ def init_db():
             )
         """)
 
-        # clienti (bază; migrarea adaugă coloane noi)
         c.execute("""
             CREATE TABLE IF NOT EXISTS clienti (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,7 +212,6 @@ def init_db():
             )
         """)
 
-        # lucrari (schema minimă; migrarea adaugă coloane)
         c.execute("""
             CREATE TABLE IF NOT EXISTS lucrari (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,7 +227,6 @@ def init_db():
             )
         """)
 
-        # atasamente (schema minimă; migrarea adaugă coloane)
         c.execute("""
             CREATE TABLE IF NOT EXISTS atasamente (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -251,7 +238,6 @@ def init_db():
             )
         """)
 
-        # facturi
         c.execute("""
             CREATE TABLE IF NOT EXISTS facturi (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -268,7 +254,6 @@ def init_db():
             )
         """)
 
-        # plati
         c.execute("""
             CREATE TABLE IF NOT EXISTS plati (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -285,7 +270,6 @@ def init_db():
 
         _migrate_schema(conn)
 
-        # admin default
         c.execute("SELECT COUNT(*) FROM utilizatori")
         if c.fetchone()[0] == 0:
             c.execute(
@@ -331,8 +315,6 @@ def login(user, pwd):
         return None
 
 
-# ---------------- DOCUMENTE (OS/CTR) ----------------
-
 def genereaza_nr_os(an: int | None = None) -> str:
     if an is None:
         an = datetime.datetime.now().year
@@ -356,9 +338,6 @@ def genereaza_nr_os(an: int | None = None) -> str:
 
 
 def genereaza_nr_contract(an: int | None = None) -> str:
-    """
-    Generează număr contract: CTR-YYYY-0001
-    """
     if an is None:
         an = datetime.datetime.now().year
 
@@ -380,8 +359,6 @@ def genereaza_nr_contract(an: int | None = None) -> str:
 
     return f"CTR-{int(an)}-{new_val:04d}"
 
-
-# ---------------- REGISTRU (per client) ----------------
 
 def genereaza_nr_inregistrare_client(client_id: int, an: int | None = None) -> str:
     if an is None:
@@ -443,8 +420,6 @@ def lista_inregistrari(client_id: int, lucrare_id: int | None = None, sarcina_id
     with sqlite3.connect(DB_PATH) as conn:
         return pd.read_sql_query(q, conn, params=params)
 
-
-# ---------------- CLIENTI ----------------
 
 def adauga_client(valori: dict):
     with sqlite3.connect(DB_PATH) as conn:
@@ -516,14 +491,59 @@ def modifica_client(id_cli: int, valori: dict):
         conn.commit()
 
 
-def sterge_client(id_cli: int):
+def dependinte_client(id_cli: int) -> dict:
+    client_id = int(id_cli)
+
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM clienti WHERE id=?", (int(id_cli),))
+
+        c.execute("SELECT COUNT(*) FROM lucrari WHERE client_id=?", (client_id,))
+        nr_lucrari = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM facturi WHERE client_id=?", (client_id,))
+        nr_facturi = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM plati WHERE client_id=?", (client_id,))
+        nr_plati = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM atasamente WHERE client_id=?", (client_id,))
+        nr_atasamente = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM inregistrari WHERE client_id=?", (client_id,))
+        nr_inregistrari = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM sarcini WHERE client_id=?", (client_id,))
+        nr_sarcini = int(c.fetchone()[0] or 0)
+
+    return {
+        "lucrari": nr_lucrari,
+        "facturi": nr_facturi,
+        "plati": nr_plati,
+        "atasamente": nr_atasamente,
+        "inregistrari": nr_inregistrari,
+        "sarcini": nr_sarcini,
+    }
+
+
+def sterge_client(id_cli: int):
+    client_id = int(id_cli)
+    deps = dependinte_client(client_id)
+
+    exista_dependinte = any(int(v or 0) > 0 for v in deps.values())
+    if exista_dependinte:
+        parts = []
+        for label, count in deps.items():
+            if int(count or 0) > 0:
+                parts.append(f"{label}: {count}")
+        raise ValueError(
+            "Clientul nu poate fi șters deoarece are date asociate: " + ", ".join(parts) + "."
+        )
+
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM clienti WHERE id=?", (client_id,))
         conn.commit()
 
-
-# ---------------- ATAȘAMENTE ----------------
 
 def lista_atasamente(client_id: int, lucrare_id: int | None = None, sarcina_id: int | None = None) -> pd.DataFrame:
     q = "SELECT * FROM atasamente WHERE client_id=?"
@@ -542,6 +562,27 @@ def lista_atasamente(client_id: int, lucrare_id: int | None = None, sarcina_id: 
         return pd.read_sql_query(q, conn, params=params)
 
 
+def _unique_filepath(folder: str, filename: str) -> tuple[str, str]:
+    base, ext = os.path.splitext(filename)
+    candidate_name = filename
+    candidate_path = os.path.join(folder, candidate_name)
+
+    if not os.path.exists(candidate_path):
+        return candidate_path, candidate_name
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate_name = f"{base}_{ts}{ext}"
+    candidate_path = os.path.join(folder, candidate_name)
+
+    counter = 1
+    while os.path.exists(candidate_path):
+        candidate_name = f"{base}_{ts}_{counter}{ext}"
+        candidate_path = os.path.join(folder, candidate_name)
+        counter += 1
+
+    return candidate_path, candidate_name
+
+
 def save_atasament(
     client_id: int,
     filename: str,
@@ -553,7 +594,8 @@ def save_atasament(
     upload_dir = os.path.join(UPLOAD_DIR, str(int(client_id)))
     os.makedirs(upload_dir, exist_ok=True)
 
-    filepath = os.path.join(upload_dir, filename)
+    filepath, final_filename = _unique_filepath(upload_dir, filename)
+
     with open(filepath, "wb") as f:
         f.write(content_bytes)
 
@@ -564,7 +606,7 @@ def save_atasament(
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             int(client_id),
-            filename,
+            final_filename,
             filepath,
             uploaded_by or "",
             str(datetime.datetime.now()),
@@ -587,8 +629,6 @@ def sterge_atasament(atas_id: int):
         c.execute("DELETE FROM atasamente WHERE id=?", (int(atas_id),))
         conn.commit()
 
-
-# ---------------- LUCRĂRI ----------------
 
 def flux_sarcini_pentru_tip_lucrare(tip_lucrare: str) -> list[str]:
     base = [
@@ -622,8 +662,9 @@ def adauga_lucrare(valori: dict):
                 adresa_judet, adresa_localitate, adresa_strada, adresa_numar, adresa_bloc, adresa_apartament,
                 interval_orar, echipa, sef_echipa,
                 cod_atr, executant, element_sda, comanda_aprovizionare,
-                diriginte_santier, contract_prestari_servicii, numar_conventie_tehnica
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                diriginte_santier, contract_prestari_servicii, numar_conventie_tehnica,
+                data_programare_pif, interval_orar_pif, echipa_pif, sef_echipa_pif
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             int(valori["client_id"]),
             valori.get("tip_lucrare", ""),
@@ -651,6 +692,10 @@ def adauga_lucrare(valori: dict):
             valori.get("diriginte_santier", ""),
             valori.get("contract_prestari_servicii", ""),
             valori.get("numar_conventie_tehnica", ""),
+            valori.get("data_programare_pif", ""),
+            valori.get("interval_orar_pif", ""),
+            valori.get("echipa_pif", ""),
+            valori.get("sef_echipa_pif", ""),
         ))
 
         lucrare_id = int(c.lastrowid)
@@ -698,7 +743,8 @@ def modifica_lucrare(lucrare_id: int, valori: dict):
                 adresa_judet=?, adresa_localitate=?, adresa_strada=?, adresa_numar=?, adresa_bloc=?, adresa_apartament=?,
                 interval_orar=?, echipa=?, sef_echipa=?,
                 cod_atr=?, executant=?, element_sda=?, comanda_aprovizionare=?,
-                diriginte_santier=?, contract_prestari_servicii=?, numar_conventie_tehnica=?
+                diriginte_santier=?, contract_prestari_servicii=?, numar_conventie_tehnica=?,
+                data_programare_pif=?, interval_orar_pif=?, echipa_pif=?, sef_echipa_pif=?
             WHERE id=?
         """, (
             int(valori["client_id"]),
@@ -727,21 +773,56 @@ def modifica_lucrare(lucrare_id: int, valori: dict):
             valori.get("diriginte_santier", ""),
             valori.get("contract_prestari_servicii", ""),
             valori.get("numar_conventie_tehnica", ""),
+            valori.get("data_programare_pif", ""),
+            valori.get("interval_orar_pif", ""),
+            valori.get("echipa_pif", ""),
+            valori.get("sef_echipa_pif", ""),
             int(lucrare_id),
         ))
         conn.commit()
 
 
-def sterge_lucrare(lucrare_id: int):
+def dependinte_lucrare(lucrare_id: int) -> dict:
+    lid = int(lucrare_id)
+
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM sarcini WHERE lucrare_id=?", (int(lucrare_id),))
-        c.execute("DELETE FROM inregistrari WHERE lucrare_id=?", (int(lucrare_id),))
-        c.execute("DELETE FROM lucrari WHERE id=?", (int(lucrare_id),))
+
+        c.execute("SELECT COUNT(*) FROM sarcini WHERE lucrare_id=?", (lid,))
+        nr_sarcini = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM inregistrari WHERE lucrare_id=?", (lid,))
+        nr_inregistrari = int(c.fetchone()[0] or 0)
+
+        c.execute("SELECT COUNT(*) FROM atasamente WHERE lucrare_id=?", (lid,))
+        nr_atasamente = int(c.fetchone()[0] or 0)
+
+    return {
+        "sarcini": nr_sarcini,
+        "inregistrari": nr_inregistrari,
+        "atasamente": nr_atasamente,
+    }
+
+
+def sterge_lucrare(lucrare_id: int):
+    lid = int(lucrare_id)
+    deps = dependinte_lucrare(lid)
+
+    exista_dependinte = any(int(v or 0) > 0 for v in deps.values())
+    if exista_dependinte:
+        parts = []
+        for label, count in deps.items():
+            if int(count or 0) > 0:
+                parts.append(f"{label}: {count}")
+        raise ValueError(
+            "Lucrarea nu poate fi ștearsă deoarece are date asociate: " + ", ".join(parts) + "."
+        )
+
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM lucrari WHERE id=?", (lid,))
         conn.commit()
 
-
-# ---------------- SARCINI ----------------
 
 def lista_sarcini_lucrare(lucrare_id: int) -> pd.DataFrame:
     with sqlite3.connect(DB_PATH) as conn:
@@ -825,8 +906,6 @@ def update_sarcina(
         c.execute(f"UPDATE sarcini SET {', '.join(fields)} WHERE id=?", params)
         conn.commit()
 
-
-# ---------------- FINANCIAR ----------------
 
 def lista_facturi(client_id: int) -> pd.DataFrame:
     with sqlite3.connect(DB_PATH) as conn:
@@ -1031,8 +1110,7 @@ def facturat_pe_clienti() -> dict:
             GROUP BY client_id
         """)
         return {int(cid): float(total or 0) for cid, total in c.fetchall()}
-    
-    # ---------------- UTILIZATORI ----------------
+
 
 def lista_utilizatori() -> pd.DataFrame:
     with sqlite3.connect(DB_PATH) as conn:
@@ -1204,6 +1282,7 @@ def sterge_utilizator(username: str):
         c.execute("DELETE FROM utilizatori WHERE username=?", (username,))
         conn.commit()
 
+
 def seteaza_must_change_password(username: str, must_change_password: int):
     username = str(username or "").strip()
 
@@ -1221,6 +1300,7 @@ def seteaza_must_change_password(username: str, must_change_password: int):
             (int(1 if must_change_password else 0), username),
         )
         conn.commit()
+
 
 def schimba_parola_fara_verificare_admin(username: str, parola_noua: str, must_change_password: int = 0):
     username = str(username or "").strip()

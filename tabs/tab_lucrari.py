@@ -2,22 +2,7 @@ import streamlit as st
 import db.db as db
 import pandas as pd
 import io
-
-
-def status_badge(status: str) -> str:
-    s = str(status or "").upper().strip()
-    if s == "PROGRAMAT":
-        return "<span class='badge badge-in'>PROGRAMAT</span>"
-    if s == "CONTRACTAT":
-        return "<span class='badge badge-fin'>CONTRACTAT</span>"
-    if s == "EXECUTAT":
-        return "<span class='badge badge-in'>EXECUTAT</span>"
-    if s == "FINALIZAT":
-        return "<span class='badge badge-fin'>FINALIZAT</span>"
-    if s == "ÎNCHIS" or s == "INCHIS":
-        return "<span class='badge badge-bl'>ÎNCHIS</span>"
-    return "<span class='badge badge-nou'>OFERTAT</span>"
-
+from tabs.utils_status import format_status
 
 def show(user):
     st.header("📊 RAPORT LUCRĂRI – Toți clienții")
@@ -60,7 +45,9 @@ def show(user):
 
     clienti_nume = sorted(df["Client"].dropna().unique().tolist()) if "Client" in df.columns else []
     tipuri = sorted(df["Tip lucrare"].dropna().unique().tolist()) if "Tip lucrare" in df.columns else []
-    statusuri = sorted(df["Status"].dropna().unique().tolist()) if "Status" in df.columns else []
+    status_order = ["OFERTAT", "CONTRACTAT", "PROGRAMAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
+    statusuri_existente = df["Status"].dropna().astype(str).unique().tolist() if "Status" in df.columns else []
+    statusuri = [s for s in status_order if s in statusuri_existente]
     echipe = sorted(df["echipa"].dropna().astype(str).unique().tolist()) if "echipa" in df.columns else []
 
     filtr_client = col1.selectbox("Client", ["Toți"] + clienti_nume, key=f"raport_client_{rid}")
@@ -135,9 +122,9 @@ def show(user):
 
     df_display = filtru_df.copy()
     if "Status" in df_display.columns:
-        df_display["Status"] = df_display["Status"].apply(status_badge)
+        df_display["Status"] = df_display["Status"].apply(format_status)
 
-    st.markdown(df_display[viz_cols].to_html(escape=False, index=False, classes="eco-table"), unsafe_allow_html=True)
+    st.markdown(df_display[viz_cols].to_html(escape=True, index=False, classes="eco-table"), unsafe_allow_html=True)
 
     if not filtru_df.empty and "Valoare (RON cu TVA)" in filtru_df.columns:
         suma_total = filtru_df["Valoare (RON cu TVA)"].sum()
