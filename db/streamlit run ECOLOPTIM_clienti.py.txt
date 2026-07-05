@@ -1,1 +1,0 @@
-streamlit run ECOLOPTIM_clienti.py
