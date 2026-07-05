@@ -533,117 +533,174 @@ def show(user):
     start, stop = (st.session_state["clienti_page"] - 1) * PAGE_SIZE, st.session_state["clienti_page"] * PAGE_SIZE
     df_page = df.iloc[start:stop]
 
-    st.markdown("<div class='clients-table'>", unsafe_allow_html=True)
-    st.markdown("<div class='eco-card'>", unsafe_allow_html=True)
-    st.markdown("#### CLIENȚI (LOC CONSUM)")
+    view_mode = st.segmented_control(
+        "Vizualizare",
+        options=["Tabel", "Carduri"],
+        default="Tabel",
+        key="clienti_view_mode",
+    )
+    mobile_view = view_mode == "Carduri"
 
-    selected_id = st.session_state.get("selected_client_id")
-    if selected_id is not None:
-        sel_df = df[df["id"] == selected_id]
-        if not sel_df.empty:
-            sel = sel_df.iloc[0]
-            meta = f"{str(sel.get('nume','')).upper()} • {str(sel.get('consum_localitate','')).upper()} • {str(sel.get('email','')).lower()}"
-        else:
-            meta = f"Client ID: {selected_id}"
+    if mobile_view:
+        st.markdown("#### CLIENȚI (vizualizare carduri)")
+        for _, row in df_page.iterrows():
+            client_id = int(row["id"])
+            data_ro = _fmt_date_ro(row.get("data_adaugarii", ""))
+            val_contract = _num(valori_contract.get(client_id, 0.0))
+            total_facturat = _num(facturat.get(client_id, 0.0))
+            sold = _num(solduri.get(client_id, 0.0))
 
-        st.markdown(
-            f"""
-            <div class="clients-actionbar">
-              <div class="meta">Selectat: <b>{meta}</b></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            with st.container(border=True):
+                st.markdown(f"**{str(row.get('nume','')).upper()}**")
+                st.caption(f"ID: {client_id} • Data: {data_ro}")
+                st.write(f"📧 {str(row.get('email','')).lower()} | 📞 {str(row.get('telefon',''))}")
+                st.write(
+                    f"📍 {str(row.get('consum_judet','')).upper()}, "
+                    f"{str(row.get('consum_localitate','')).upper()}, "
+                    f"{str(row.get('consum_strada','')).upper()} nr. {str(row.get('consum_numar',''))}"
+                )
+                st.write(f"Status: {format_status(row.get('status',''))}")
+                st.write(
+                    f"Contract: **{val_contract:,.2f}** | "
+                    f"Facturat: **{total_facturat:,.2f}** | "
+                    f"Sold: **{sold:,.2f}**"
+                )
 
-        btn_cols = st.columns([1, 1, 1, 1, 1, 6])
-        if _icon_btn(btn_cols[0], "✏️", key="sel_edit"):
-            close_all_modals()
-            st.session_state["edit_client_id"] = int(selected_id)
-            st.rerun()
-        if _icon_btn(btn_cols[1], "🔨", key="sel_lucrari"):
-            close_all_modals()
-            st.session_state["lucrari_for_client"] = int(selected_id)
-            st.rerun()
-        if _icon_btn(btn_cols[2], "💶", key="sel_fin"):
-            close_all_modals()
-            st.session_state["financiar_for_client"] = int(selected_id)
-            st.rerun()
-        if _icon_btn(btn_cols[3], "📎", key="sel_attach"):
-            close_all_modals()
-            st.session_state["show_atasamente_for"] = int(selected_id)
-            st.session_state["show_atasamente_lucrare_id"] = None
-            st.session_state["show_atasamente_sarcina_id"] = None
-            st.rerun()
-        if _icon_btn(btn_cols[4], "🗑️", key="sel_delete"):
-            close_all_modals()
-            st.session_state["delete_client_id"] = int(selected_id)
-            st.rerun()
+                c1, c2, c3, c4, c5 = st.columns(5)
+                if c1.button("✏️", key=f"m_edit_{client_id}"):
+                    close_all_modals()
+                    st.session_state["edit_client_id"] = client_id
+                    st.rerun()
+                if c2.button("🔨", key=f"m_lucr_{client_id}"):
+                    close_all_modals()
+                    st.session_state["lucrari_for_client"] = client_id
+                    st.rerun()
+                if c3.button("💶", key=f"m_fin_{client_id}"):
+                    close_all_modals()
+                    st.session_state["financiar_for_client"] = client_id
+                    st.rerun()
+                if c4.button("📎", key=f"m_att_{client_id}"):
+                    close_all_modals()
+                    st.session_state["show_atasamente_for"] = client_id
+                    st.session_state["show_atasamente_lucrare_id"] = None
+                    st.session_state["show_atasamente_sarcina_id"] = None
+                    st.rerun()
+                if c5.button("🗑️", key=f"m_del_{client_id}"):
+                    close_all_modals()
+                    st.session_state["delete_client_id"] = client_id
+                    st.rerun()
+    else:
+        st.markdown("<div class='clients-table'>", unsafe_allow_html=True)
+        st.markdown("<div class='eco-card'>", unsafe_allow_html=True)
+        st.markdown("#### CLIENȚI (LOC CONSUM)")
 
-    h_cols = st.columns([11.45, 0.55])
-    with h_cols[0]:
-        st.markdown(
-            """
-            <div class="clients-grid clients-grid-header">
-              <div>DATA</div><div>NUME</div><div>EMAIL</div><div>JUDEȚ</div><div>LOCALITATE</div>
-              <div>STRADA</div><div>NUMĂR</div><div>STATUS</div><div>VALOARE CONTRACT</div><div>FACTURAT</div><div>SOLD</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with h_cols[1]:
-        st.markdown("<div class='clients-grid-header' style='text-align:center;'>SEL</div>", unsafe_allow_html=True)
+        selected_id = st.session_state.get("selected_client_id")
+        if selected_id is not None:
+            sel_df = df[df["id"] == selected_id]
+            if not sel_df.empty:
+                sel = sel_df.iloc[0]
+                meta = f"{str(sel.get('nume','')).upper()} • {str(sel.get('consum_localitate','')).upper()} • {str(sel.get('email','')).lower()}"
+            else:
+                meta = f"Client ID: {selected_id}"
 
-    for _, row in df_page.iterrows():
-        client_id = int(row["id"])
-        data_ro = _fmt_date_ro(row.get("data_adaugarii", ""))
-        val_contract = _num(valori_contract.get(client_id, 0.0))
-        total_facturat = _num(facturat.get(client_id, 0.0))
-        sold = _num(solduri.get(client_id, 0.0))
-
-        fact_html = f"{total_facturat:,.2f}"
-        if total_facturat > 0:
-            fact_html = f"<span style='color:#0A84FF; font-weight:900;'>{total_facturat:,.2f}</span>"
-
-        sold_html = f"{sold:,.2f}"
-        if sold > 0:
-            sold_html = f"<span style='color:#EF4444; font-weight:900;'>{sold:,.2f}</span>"
-        elif sold < 0:
-            sold_html = f"<span style='color:#10B981; font-weight:900;'>{sold:,.2f}</span>"
-
-        row_class = "clients-grid-row"
-        if st.session_state.get("selected_client_id") == client_id:
-            row_class += " selected"
-
-        row_cols = st.columns([11.45, 0.55])
-
-        with row_cols[0]:
             st.markdown(
                 f"""
-                <div class="clients-grid {row_class}">
-                  <div class="clip">{data_ro}</div>
-                  <div class="clip">{str(row.get('nume','')).upper()}</div>
-                  <div class="clip">{str(row.get('email','')).lower()}</div>
-                  <div class="clip">{str(row.get('consum_judet','')).upper()}</div>
-                  <div class="clip">{str(row.get('consum_localitate','')).upper()}</div>
-                  <div class="clip">{str(row.get('consum_strada','')).upper()}</div>
-                  <div class="clip">{str(row.get('consum_numar',''))}</div>
-                  <div class="clip">{format_status(row.get('status',''))}</div>
-                  <div class="clip num">{val_contract:,.2f}</div>
-                  <div class="clip num">{fact_html}</div>
-                  <div class="clip num">{sold_html}</div>
+                <div class="clients-actionbar">
+                  <div class="meta">Selectat: <b>{meta}</b></div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-        with row_cols[1]:
-            is_sel = st.session_state.get("selected_client_id") == client_id
-            if st.button("▾" if is_sel else "▸", key=f"sel_{client_id}"):
-                st.session_state["selected_client_id"] = client_id
+            btn_cols = st.columns([1, 1, 1, 1, 1, 6])
+            if _icon_btn(btn_cols[0], "✏️", key="sel_edit"):
+                close_all_modals()
+                st.session_state["edit_client_id"] = int(selected_id)
+                st.rerun()
+            if _icon_btn(btn_cols[1], "🔨", key="sel_lucrari"):
+                close_all_modals()
+                st.session_state["lucrari_for_client"] = int(selected_id)
+                st.rerun()
+            if _icon_btn(btn_cols[2], "💶", key="sel_fin"):
+                close_all_modals()
+                st.session_state["financiar_for_client"] = int(selected_id)
+                st.rerun()
+            if _icon_btn(btn_cols[3], "📎", key="sel_attach"):
+                close_all_modals()
+                st.session_state["show_atasamente_for"] = int(selected_id)
+                st.session_state["show_atasamente_lucrare_id"] = None
+                st.session_state["show_atasamente_sarcina_id"] = None
+                st.rerun()
+            if _icon_btn(btn_cols[4], "🗑️", key="sel_delete"):
+                close_all_modals()
+                st.session_state["delete_client_id"] = int(selected_id)
                 st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+        h_cols = st.columns([11.45, 0.55])
+        with h_cols[0]:
+            st.markdown(
+                """
+                <div class="clients-grid clients-grid-header">
+                  <div>DATA</div><div>NUME</div><div>EMAIL</div><div>JUDEȚ</div><div>LOCALITATE</div>
+                  <div>STRADA</div><div>NUMĂR</div><div>STATUS</div><div>VALOARE CONTRACT</div><div>FACTURAT</div><div>SOLD</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with h_cols[1]:
+            st.markdown("<div class='clients-grid-header' style='text-align:center;'>SEL</div>", unsafe_allow_html=True)
+
+        for _, row in df_page.iterrows():
+            client_id = int(row["id"])
+            data_ro = _fmt_date_ro(row.get("data_adaugarii", ""))
+            val_contract = _num(valori_contract.get(client_id, 0.0))
+            total_facturat = _num(facturat.get(client_id, 0.0))
+            sold = _num(solduri.get(client_id, 0.0))
+
+            fact_html = f"{total_facturat:,.2f}"
+            if total_facturat > 0:
+                fact_html = f"<span style='color:#0A84FF; font-weight:900;'>{total_facturat:,.2f}</span>"
+
+            sold_html = f"{sold:,.2f}"
+            if sold > 0:
+                sold_html = f"<span style='color:#EF4444; font-weight:900;'>{sold:,.2f}</span>"
+            elif sold < 0:
+                sold_html = f"<span style='color:#10B981; font-weight:900;'>{sold:,.2f}</span>"
+
+            row_class = "clients-grid-row"
+            if st.session_state.get("selected_client_id") == client_id:
+                row_class += " selected"
+
+            row_cols = st.columns([11.45, 0.55])
+
+            with row_cols[0]:
+                st.markdown(
+                    f"""
+                    <div class="clients-grid {row_class}">
+                      <div class="clip">{data_ro}</div>
+                      <div class="clip">{str(row.get('nume','')).upper()}</div>
+                      <div class="clip">{str(row.get('email','')).lower()}</div>
+                      <div class="clip">{str(row.get('consum_judet','')).upper()}</div>
+                      <div class="clip">{str(row.get('consum_localitate','')).upper()}</div>
+                      <div class="clip">{str(row.get('consum_strada','')).upper()}</div>
+                      <div class="clip">{str(row.get('consum_numar',''))}</div>
+                      <div class="clip">{format_status(row.get('status',''))}</div>
+                      <div class="clip num">{val_contract:,.2f}</div>
+                      <div class="clip num">{fact_html}</div>
+                      <div class="clip num">{sold_html}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with row_cols[1]:
+                is_sel = st.session_state.get("selected_client_id") == client_id
+                if st.button("▾" if is_sel else "▸", key=f"sel_{client_id}"):
+                    st.session_state["selected_client_id"] = client_id
+                    st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
     # ---- PAGINARE (centrată) ----
