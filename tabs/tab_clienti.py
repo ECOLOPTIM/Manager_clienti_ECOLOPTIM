@@ -2,6 +2,7 @@ import streamlit as st
 import db.db as db
 import pandas as pd
 import io
+import re
 from tabs.utils_status import format_status
 
 
@@ -43,6 +44,13 @@ def _num(x) -> float:
         return float(x or 0.0)
     except Exception:
         return 0.0
+    
+def _is_mobile() -> bool:
+    try:
+        ua = st.context.headers.get("user-agent", "").lower()
+    except Exception:
+        ua = ""
+    return bool(re.search(r"android|iphone|ipad|mobile", ua))
 
 
 def show(user):
@@ -525,9 +533,6 @@ def show(user):
     start, stop = (st.session_state["clienti_page"] - 1) * PAGE_SIZE, st.session_state["clienti_page"] * PAGE_SIZE
     df_page = df.iloc[start:stop]
 
-    if "selected_client_id" not in st.session_state:
-        st.session_state["selected_client_id"] = None
-
     st.markdown("<div class='clients-table'>", unsafe_allow_html=True)
     st.markdown("<div class='eco-card'>", unsafe_allow_html=True)
     st.markdown("#### CLIENȚI (LOC CONSUM)")
@@ -574,7 +579,6 @@ def show(user):
             st.session_state["delete_client_id"] = int(selected_id)
             st.rerun()
 
-    # Header: stânga (grid 11 col) + dreapta (SEL)
     h_cols = st.columns([11.45, 0.55])
     with h_cols[0]:
         st.markdown(
@@ -591,7 +595,6 @@ def show(user):
 
     for _, row in df_page.iterrows():
         client_id = int(row["id"])
-
         data_ro = _fmt_date_ro(row.get("data_adaugarii", ""))
         val_contract = _num(valori_contract.get(client_id, 0.0))
         total_facturat = _num(facturat.get(client_id, 0.0))
@@ -639,8 +642,9 @@ def show(user):
                 st.session_state["selected_client_id"] = client_id
                 st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)  # eco-card
-    st.markdown("</div>", unsafe_allow_html=True)  # clients-table
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
     # ---- PAGINARE (centrată) ----
     st.markdown("---")
