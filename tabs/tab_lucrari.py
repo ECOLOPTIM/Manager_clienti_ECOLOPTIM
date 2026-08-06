@@ -3,6 +3,7 @@ import db.db as db
 import pandas as pd
 import io
 from utils.utils_status import format_status
+from utils.utils_documents import make_export_filename
 
 def show(user):
     st.header("📊 RAPORT LUCRĂRI – Toți clienții")
@@ -139,14 +140,14 @@ def show(user):
     ex[0].download_button(
         "💾 Export Excel",
         data=buffer,
-        file_name="Raport_lucrari.xlsx",
+        file_name=make_export_filename("Raport_lucrari", ext="xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="export_rap_lucrari_xls",
     )
     ex[1].download_button(
         "💾 Export CSV",
         data=filtru_df[viz_cols].to_csv(index=False).encode("utf-8"),
-        file_name="Raport_lucrari.csv",
+        file_name=make_export_filename("Raport_lucrari", ext="csv"),
         mime="text/csv",
         key="export_rap_lucrari_csv",
     )

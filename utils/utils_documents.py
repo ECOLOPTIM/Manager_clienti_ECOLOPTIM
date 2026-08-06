@@ -2,7 +2,14 @@ import io
 import os
 import sys
 import tempfile
+from datetime import datetime
+
 import streamlit as st
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 try:
     from docxtpl import DocxTemplate
@@ -28,6 +35,54 @@ def safe_filename_part(s: str, max_len: int = 60) -> str:
     s = "".join(ch for ch in s if ch.isalnum() or ch in (" ", "_", "-", "."))
     s = s.strip().replace(" ", "_")
     return (s[:max_len] or "client")
+
+
+def fmt_date(dt, fmt: str = "%Y-%m-%d") -> str:
+    """Return a formatted date string, or '' if the value is missing/invalid."""
+    if dt is None:
+        return ""
+    try:
+        if pd is not None and pd.isna(dt):
+            return ""
+        if pd is not None:
+            return pd.to_datetime(dt).strftime(fmt)
+        return safe_str(dt)
+    except Exception:
+        return safe_str(dt)
+
+
+def fmt_currency(value, decimals: int = 2, suffix: str = " RON") -> str:
+    """Format a numeric value as a currency string. Returns '' for missing/invalid values."""
+    if value is None:
+        return ""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return safe_str(value)
+    fmt = f"{f:,.{decimals}f}"
+    return fmt + suffix if suffix else fmt
+
+
+def make_export_filename(
+    label: str,
+    client_name: str = "",
+    ext: str = "xlsx",
+    with_timestamp: bool = True,
+) -> str:
+    """Build a consistent, safe filename for exports.
+
+    Examples:
+        make_export_filename("Raport_lucrari")          → "Raport_lucrari_20240806_141530.xlsx"
+        make_export_filename("facturi", "Ion Popescu")  → "facturi_Ion_Popescu_20240806_141530.xlsx"
+    """
+    parts = [safe_filename_part(label, max_len=40)]
+    if client_name:
+        parts.append(safe_filename_part(client_name, max_len=50))
+    if with_timestamp:
+        parts.append(datetime.now().strftime("%Y%m%d_%H%M%S"))
+    name = "_".join(p for p in parts if p)
+    ext = ext.lstrip(".")
+    return f"{name}.{ext}"
 
 
 def split_team(s: str) -> list[str]:

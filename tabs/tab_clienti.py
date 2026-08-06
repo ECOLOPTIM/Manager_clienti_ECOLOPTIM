@@ -4,6 +4,7 @@ import pandas as pd
 import io
 import re
 from utils.utils_status import format_status
+from utils.utils_documents import make_export_filename
 
 
 STATUS_OPTIONS = ["OFERTAT", "CONTRACTAT", "PROGRAMAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
@@ -791,7 +792,7 @@ def show(user):
         st.download_button(
             label="💾 EXPORT EXCEL",
             data=buffer,
-            file_name="CLIENTI.xlsx",
+            file_name=make_export_filename("CLIENTI", ext="xlsx"),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="export_excel_clienti",
         )
@@ -799,7 +800,7 @@ def show(user):
         st.download_button(
             label="💾 EXPORT CSV",
             data=csv_data,
-            file_name="CLIENTI.csv",
+            file_name=make_export_filename("CLIENTI", ext="csv"),
             mime="text/csv",
             key="export_csv_clienti",
         )

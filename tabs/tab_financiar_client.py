@@ -3,6 +3,7 @@ from datetime import datetime
 import io
 
 import db.db as db
+from utils.utils_documents import make_export_filename
 
 PREFIX = "fin_client_"
 METODE_PLATA = ["", "CASH", "OP", "CARD"]
@@ -84,7 +85,7 @@ def show(user: str, client_id: int):
             st.download_button(
                 "💾 Export facturi (Excel)",
                 data=buffer,
-                file_name=f"facturi_client_{client_id}.xlsx",
+                file_name=make_export_filename("facturi", client_name=client.get("nume", ""), ext="xlsx"),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key=f"{PREFIX}export_fact_{client_id}"
             )
@@ -140,7 +141,7 @@ def show(user: str, client_id: int):
             st.download_button(
                 "💾 Export plăți (Excel)",
                 data=buffer,
-                file_name=f"plati_client_{client_id}.xlsx",
+                file_name=make_export_filename("plati", client_name=client.get("nume", ""), ext="xlsx"),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key=f"{PREFIX}export_plati_{client_id}"
             )
