@@ -7,6 +7,11 @@ from datetime import datetime
 import streamlit as st
 
 try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+try:
     from docxtpl import DocxTemplate
 except Exception:
     DocxTemplate = None
@@ -37,10 +42,11 @@ def fmt_date(dt, fmt: str = "%Y-%m-%d") -> str:
     if dt is None:
         return ""
     try:
-        import pandas as pd
-        if pd.isna(dt):
+        if pd is not None and pd.isna(dt):
             return ""
-        return pd.to_datetime(dt).strftime(fmt)
+        if pd is not None:
+            return pd.to_datetime(dt).strftime(fmt)
+        return safe_str(dt)
     except Exception:
         return safe_str(dt)
 
