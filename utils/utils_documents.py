@@ -8,7 +8,7 @@ import streamlit as st
 
 try:
     import pandas as pd
-except Exception:
+except ImportError:
     pd = None
 
 try:
