@@ -5,8 +5,8 @@ import io
 import os
 from datetime import datetime
 
-from tabs.documents_config import TEMPLATE_MAP
-from tabs.utils_documents import (
+from config.documents_config import TEMPLATE_MAP
+from utils.utils_documents import (
     safe_str,
     safe_filename_part,
     split_team,
@@ -17,9 +17,9 @@ from tabs.utils_documents import (
     render_docx,
     docx_bytes_to_pdf_bytes_via_word,
 )
-from tabs.utils_excel import render_excel_template
-from tabs.excel_mappings import SITUATIE_PLATA_BRANSAMENT_CONFIG
-from tabs.utils_status import format_status
+from utils.utils_excel import render_excel_template
+from config.excel_mappings import SITUATIE_PLATA_BRANSAMENT_CONFIG
+from utils.utils_status import format_status
 
 TIPURI_LUCRARE = [
     "Instalatie termica noua",

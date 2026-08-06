@@ -114,3 +114,38 @@ La prima pornire:
 - `tabs/tab_clienti.py` — management clienți
 - `tabs/tab_lucrari_client.py` — management lucrări + documente + flux birou
 - `tabs/tab_financiar_client.py` — facturi / plăți / sold
+## Structura proiectului
+
+```
+ECOLOPTIM_clienti.py   # entry point Streamlit
+db/
+  __init__.py          # marker pachet Python
+  db.py                # toate funcțiile de acces la baza de date
+tabs/
+  __init__.py          # marker pachet Python
+  tab_*.py             # tab-uri UI
+  utils_status.py      # re-export → utils/utils_status.py
+  utils_documents.py   # re-export → utils/utils_documents.py
+  utils_excel.py       # re-export → utils/utils_excel.py
+  documents_config.py  # re-export → config/documents_config.py
+  excel_mappings.py    # re-export → config/excel_mappings.py
+utils/
+  __init__.py
+  utils_status.py      # helper formatare status
+  utils_documents.py   # generare documente Word/PDF
+  utils_excel.py       # generare Excel din template
+config/
+  __init__.py
+  documents_config.py  # mapare template DOCX/XLSX
+  excel_mappings.py    # configurare celule Excel
+assets/
+templates/
+uploads/
+```
+
+Importul canonic pentru module utilitare este:
+- `from utils.utils_status import format_status`
+- `from utils.utils_documents import render_docx, ...`
+- `from config.documents_config import TEMPLATE_MAP`
+
+Fișierele cu același nume din `tabs/` sunt re-exporturi pentru compatibilitate retroactivă.

@@ -2,7 +2,7 @@ import streamlit as st
 import db.db as db
 import pandas as pd
 import io
-from tabs.utils_status import format_status
+from utils.utils_status import format_status
 
 def show(user):
     st.header("📊 RAPORT LUCRĂRI – Toți clienții")

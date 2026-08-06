@@ -3,7 +3,7 @@ import db.db as db
 import pandas as pd
 import io
 import re
-from tabs.utils_status import format_status
+from utils.utils_status import format_status
 
 
 STATUS_OPTIONS = ["OFERTAT", "CONTRACTAT", "PROGRAMAT", "EXECUTAT", "FINALIZAT", "ÎNCHIS"]
