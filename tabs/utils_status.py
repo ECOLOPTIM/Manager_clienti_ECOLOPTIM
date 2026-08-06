@@ -1,14 +1,3 @@
-def format_status(status: str) -> str:
-    s = str(status or "").upper().strip()
-
-    if s == "CONTRACTAT":
-        return "🟣 CONTRACTAT"
-    if s == "PROGRAMAT":
-        return "🔵 PROGRAMAT"
-    if s == "EXECUTAT":
-        return "🟢 EXECUTAT"
-    if s == "FINALIZAT":
-        return "✅ FINALIZAT"
-    if s in ("ÎNCHIS", "INCHIS"):
-        return "⚫ ÎNCHIS"
-    return "🟡 OFERTAT"
+# Re-exported from utils.utils_status for backward compatibility.
+# Prefer importing from utils.utils_status directly.
+from utils.utils_status import format_status  # noqa: F401
