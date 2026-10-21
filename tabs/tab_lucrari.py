@@ -56,16 +56,30 @@ def show(user):
     filtr_status = col3.selectbox("Status", ["Toate"] + statusuri, key=f"raport_status_{rid}")
     filtr_echipa = col4.selectbox("Echipă", ["Toate"] + echipe, key=f"raport_echipa_{rid}")
 
-    min_valoare = int(df["Valoare (RON cu TVA)"].min()) if "Valoare (RON cu TVA)" in df.columns else 0
-    max_valoare = int(df["Valoare (RON cu TVA)"].max()) if "Valoare (RON cu TVA)" in df.columns else 10000
-    filtru_suma = col5.slider(
-        "Interval valoare (RON cu TVA)",
-        min_value=min_valoare,
-        max_value=max_valoare,
-        value=(min_valoare, max_valoare),
-        step=100,
-        key=f"raport_suma_{rid}",
-    )
+    filtru_suma = None
+    if "Valoare (RON cu TVA)" in df.columns:
+        df["Valoare (RON cu TVA)"] = pd.to_numeric(
+            df["Valoare (RON cu TVA)"], errors="coerce"
+        ).replace([float("inf"), -float("inf")], float("nan"))
+        sume = df["Valoare (RON cu TVA)"].dropna()
+        if not sume.empty:
+            min_valoare, max_valoare = float(sume.min()), float(sume.max())
+            if min_valoare == max_valoare:
+                # Streamlit sliders require distinct bounds, even when disabled.
+                col5.caption(f"Valoare: {min_valoare:,.2f} RON cu TVA")
+                filtru_suma = (min_valoare, max_valoare)
+            else:
+                filtru_suma = col5.slider(
+                    "Interval valoare (RON cu TVA)",
+                    min_value=min_valoare,
+                    max_value=max_valoare,
+                    value=(min_valoare, max_valoare),
+                    step=0.01,
+                    format="%.2f",
+                    key=f"raport_suma_{rid}",
+                )
+        else:
+            col5.caption("Valoare indisponibilă")
     filtru_cauta = col6.text_input("Căutare", key=f"raport_search_{rid}")
 
     if col7.button("Reset", key=f"raport_reset_{rid}"):
@@ -84,7 +98,7 @@ def show(user):
     if filtr_echipa != "Toate" and "echipa" in filtru_df.columns:
         filtru_df = filtru_df[filtru_df["echipa"].astype(str) == filtr_echipa]
 
-    if "Valoare (RON cu TVA)" in filtru_df.columns:
+    if filtru_suma is not None:
         filtru_df = filtru_df[
             (filtru_df["Valoare (RON cu TVA)"] >= filtru_suma[0])
             & (filtru_df["Valoare (RON cu TVA)"] <= filtru_suma[1])

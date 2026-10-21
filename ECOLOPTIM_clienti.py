@@ -16,6 +16,10 @@ from tabs import (
 )
 
 import db.db as db
+from db import permissions
+from tabs import tab_consultare
+
+permissions.clear_actor()
 
 # IMPORTANT: set_page_config trebuie să fie primul apel Streamlit (înainte de orice st.* output)
 st.set_page_config(page_title="ECOLOPTIM_clienti", page_icon="🧑‍🔧", layout="wide")
@@ -59,6 +63,9 @@ def login():
         return
 
     load_ui()
+    notice = st.session_state.pop("auth_notice", None)
+    if notice:
+        st.warning(notice)
 
     st.markdown("<div class='login-wrap'>", unsafe_allow_html=True)
     st.markdown("<div class='login-card'>", unsafe_allow_html=True)
@@ -98,6 +105,7 @@ def login():
             st.session_state["user"] = user_row[1]
             st.session_state["role"] = user_row[3]
             st.session_state["must_change_password"] = bool(user_row[5])
+            st.session_state["auth_password_marker"] = permissions.password_marker({"parola": user_row[2]})
             st.rerun()
         else:
             st.error("Utilizator, parolă greșită sau cont inactiv.")
@@ -111,8 +119,17 @@ def login():
 
 login()
 user = st.session_state["user"]
-role = st.session_state.get("role", "")
-must_change_password = st.session_state.get("must_change_password", False)
+profile = db.get_utilizator(user)
+if (not profile or not profile.get("activ") or profile.get("rol") not in permissions.ROLES
+        or st.session_state.get("auth_password_marker") != permissions.password_marker(profile)):
+    st.session_state.clear()
+    st.session_state["auth_notice"] = "Contul sau parola s-a modificat. Autentifica-te din nou."
+    st.rerun()
+role = profile["rol"]
+must_change_password = bool(profile.get("must_change_password"))
+st.session_state["role"] = role
+st.session_state["must_change_password"] = must_change_password
+permissions.bind_actor(user, st.session_state["auth_password_marker"])
 
 load_ui()
 render_header(user, role)
@@ -146,11 +163,8 @@ with st.sidebar:
                     if parola_veche == parola_noua:
                         raise ValueError("Parola nouă trebuie să fie diferită de cea veche.")
 
-                    user_row = db.login(user, parola_veche)
-                    if not user_row:
-                        raise ValueError("Parola curentă este incorectă.")
-
-                    db.schimba_parola_fara_verificare_admin(user, parola_noua, must_change_password=0)
+                    db.schimba_parola(user, parola_veche, parola_noua)
+                    st.session_state["auth_password_marker"] = permissions.password_marker(db.get_utilizator(user))
                     st.session_state["must_change_password"] = False
                     st.success("Parola a fost schimbată cu succes.")
                     st.rerun()
@@ -158,25 +172,13 @@ with st.sidebar:
                     st.error(str(e))
 
     if st.button("⛔ Renunță", key="logout_btn"):
-        st.session_state.pop("user", None)
-        st.session_state.pop("role", None)
-        st.session_state.pop("must_change_password", None)
-        for k in [
-            "add_client_open",
-            "edit_client_id",
-            "lucrari_for_client",
-            "financiar_for_client",
-            "delete_client_id",
-            "show_atasamente_for",
-            "show_atasamente_lucrare_id",
-            "show_atasamente_sarcina_id",
-            "open_financiar_for_client",
-        ]:
-            st.session_state.pop(k, None)
+        permissions.clear_actor()
+        st.session_state.clear()
         st.rerun()
 
 if must_change_password:
-    st.info("Pentru siguranță, schimbă parola din bara laterală înainte să continui.")
+    st.info("Schimba parola din bara laterala inainte sa continui.")
+    st.stop()
 
 tab_defs = [
     ("🏠 Overview", lambda: tab_overview.show(user)),
@@ -193,9 +195,22 @@ tab_defs = [
 if role == "admin":
     tab_defs.append(("👤 Utilizatori", lambda: tab_utilizatori.show(user)))
 
+if role == "vizualizare":
+    st.info("Cont cu acces numai pentru consultare.")
+    tab_defs = [
+        ("🏠 Overview", lambda: tab_overview.show(user)),
+        ("👥 Clienți", lambda: tab_consultare.show_clienti(user)),
+        ("⚠️ Alerte", lambda: tab_alerte.show(user)),
+        ("📌 Sarcini", lambda: tab_consultare.show_sarcini(user)),
+        ("🔨 Lucrări", lambda: tab_lucrari.show(user)),
+    ]
+
 tab_titles = [title for title, _ in tab_defs]
 tab_objects = st.tabs(tab_titles)
 
 for tab_obj, (_, render_fn) in zip(tab_objects, tab_defs):
     with tab_obj:
-        render_fn()
+        try:
+            render_fn()
+        except PermissionError as exc:
+            st.error(str(exc))

@@ -55,7 +55,7 @@ def show(user: str, client_id: int):
                 "total": "{:,.2f}",
                 "incasat": "{:,.2f}",
                 "rest": "{:,.2f}",
-            }).applymap(_style_rest, subset=["rest"])
+            }).map(_style_rest, subset=["rest"])
 
             st.dataframe(styled, use_container_width=True, hide_index=True)
 

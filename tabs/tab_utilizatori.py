@@ -1,5 +1,6 @@
 import streamlit as st
 import db.db as db
+from db import permissions
 
 ROLURI = ["admin", "birou", "vizualizare"]
 PREFIX = "utilizatori_"
@@ -10,6 +11,12 @@ def show(user):
 
     if role != "admin":
         st.error("Nu ai drepturi pentru administrarea utilizatorilor.")
+        st.stop()
+
+    try:
+        permissions.require("admin")
+    except PermissionError as exc:
+        st.error(str(exc))
         st.stop()
 
     st.header("👤 Administrare utilizatori")
@@ -72,12 +79,14 @@ def show(user):
                 ROLURI,
                 index=ROLURI.index(rol_curent) if rol_curent in ROLURI else 1,
                 key=f"{PREFIX}role_{username}",
+                disabled=(username.lower() == "admin"),
             )
 
             activ_nou = c3.checkbox(
                 "Activ",
                 value=bool(activ_curent),
                 key=f"{PREFIX}activ_{username}",
+                disabled=(username.lower() == "admin"),
             )
 
             must_change_nou = c4.checkbox(

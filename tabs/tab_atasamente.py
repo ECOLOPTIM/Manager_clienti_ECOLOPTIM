@@ -15,6 +15,7 @@ def show(user, client_id, lucrare_id=None, sarcina_id=None):
         ctx_parts.append(f"Sarcină ID **{int(sarcina_id)}**")
 
     st.markdown(" | ".join(ctx_parts))
+    st.caption("Notă: dimensiunea maximă implicită per fișier este 20 MB.")
 
     atasamente = db.lista_atasamente(int(client_id), lucrare_id=lucrare_id, sarcina_id=sarcina_id)
 
@@ -63,7 +64,11 @@ def show(user, client_id, lucrare_id=None, sarcina_id=None):
         uploaded_file = col1.file_uploader("Alege fișier", label_visibility="collapsed")
         submit = col2.form_submit_button("Încarcă")
 
-    if submit and uploaded_file:
+    if submit:
+        if not uploaded_file:
+            st.warning("Alege un fișier înainte de încărcare.")
+            return
+
         numedefis = uploaded_file.name.rsplit(".", 1)[0].lower()
 
         toate = db.lista_atasamente(int(client_id), lucrare_id=lucrare_id, sarcina_id=sarcina_id)
@@ -76,7 +81,9 @@ def show(user, client_id, lucrare_id=None, sarcina_id=None):
 
         if nume_duplicat:
             st.error(f"Există deja un fișier cu numele '{numedefis}' în acest context (indiferent de extensie)!")
-        else:
+            return
+
+        try:
             db.save_atasament(
                 int(client_id),
                 uploaded_file.name,
@@ -87,3 +94,10 @@ def show(user, client_id, lucrare_id=None, sarcina_id=None):
             )
             st.success("Fișier încărcat cu succes!")
             st.rerun()
+
+        except ValueError as e:
+            # mesaje controlate din db.save_atasament (nume invalid / fișier gol / prea mare)
+            st.error(str(e))
+
+        except Exception as e:
+            st.error(f"Eroare neașteptată la upload: {type(e).__name__} - {e}")

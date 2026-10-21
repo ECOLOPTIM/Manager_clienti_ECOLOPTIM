@@ -4,12 +4,79 @@ import os
 import hashlib
 import hmac
 import secrets
+import re
+import unicodedata
+import math
+from contextlib import closing
+from pathlib import Path
 import pandas as pd
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "public")
 
 DB_PATH = os.getenv("DB_PATH", "manager_clienti_modern.db")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin")
 PBKDF2_ITERATIONS = 600_000
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))  # 20 MB default
+
+
+class ConcurrentWorkEditError(ValueError):
+    """The work changed or disappeared after its edit form was opened."""
+
+
+def _connect():
+    if not DATABASE_URL:
+        return sqlite3.connect(DB_PATH)
+    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        raise ValueError("DATABASE_URL trebuie sa fie o adresa PostgreSQL valida.")
+    if not re.fullmatch(r"[a-z_][a-z0-9_]*", DATABASE_SCHEMA):
+        raise ValueError("Nume de schema PostgreSQL invalid.")
+    import psycopg
+    return psycopg.connect(DATABASE_URL, connect_timeout=10,
+                           options=f"-c search_path={DATABASE_SCHEMA}")
+
+
+def _execute(cursor, query: str, params=None):
+    if DATABASE_URL:
+        # All SQL templates in this module use ? only for bind markers.
+        # Percent signs in SQL literals are escaped for psycopg, not in values.
+        if params is not None:
+            query = query.replace("%", "%%").replace("?", "%s")
+        query = query.replace(" LIKE ", " ILIKE ")
+    return cursor.execute(query, params) if params is not None else cursor.execute(query)
+
+
+def _read_frame(query: str, conn, params=None) -> pd.DataFrame:
+    with closing(conn.cursor()) as cur:
+        _execute(cur, query, params)
+        return pd.DataFrame.from_records(cur.fetchall(),
+                                        columns=[col[0] for col in cur.description],
+                                        coerce_float=True)
+
+
+def _init_postgres():
+    with closing(_connect()) as conn, conn:
+        with conn.cursor() as cur:
+            # Serialize initialization across browser sessions and processes.
+            cur.execute("SELECT pg_advisory_xact_lock(452601021)")
+            _execute(cur, "SELECT to_regclass(?)", (f"{DATABASE_SCHEMA}.ecoloptim_schema_version",))
+            if cur.fetchone()[0] is None:
+                _execute(cur, "SELECT tablename FROM pg_tables WHERE schemaname=?", (DATABASE_SCHEMA,))
+                if cur.fetchone() is not None:
+                    raise ValueError("Baza PostgreSQL nu este goala. Foloseste o baza noua de test.")
+                schema = Path(__file__).with_name("schema_postgres.sql").read_text(encoding="utf-8")
+                cur.execute(schema)
+                cur.execute("CREATE TABLE ecoloptim_schema_version (version INTEGER PRIMARY KEY)")
+                cur.execute("INSERT INTO ecoloptim_schema_version VALUES (1)")
+                cur.execute("INSERT INTO utilizatori "
+                            "(username, parola, rol, activ, must_change_password, created_at) "
+                            "VALUES (%s, %s, 'admin', 1, 1, %s)",
+                            ("admin", hash_password(DEFAULT_ADMIN_PASSWORD), str(datetime.datetime.now())))
+            else:
+                cur.execute("SELECT version FROM ecoloptim_schema_version")
+                if cur.fetchall() != [(1,)]:
+                    raise ValueError("Versiune de schema PostgreSQL incompatibila.")
 
 
 def _ensure_parent_dir(file_path: str):
@@ -52,7 +119,7 @@ def verify_password(password: str, stored_value: str) -> bool:
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set:
     cur = conn.cursor()
-    cur.execute(f"PRAGMA table_info({table_name})")
+    _execute(cur, f"PRAGMA table_info({table_name})")
     return {row[1] for row in cur.fetchall()}
 
 
@@ -61,34 +128,34 @@ def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, col_name: 
     if col_name in cols:
         return
     cur = conn.cursor()
-    cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+    _execute(cur, f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
 
 
 def _migrate_schema(conn: sqlite3.Connection):
     cur = conn.cursor()
 
-    cur.execute("""
+    _execute(cur, """
         CREATE TABLE IF NOT EXISTS documente_seq (
             an INTEGER PRIMARY KEY,
             last_os INTEGER NOT NULL DEFAULT 0
         )
     """)
 
-    cur.execute("""
+    _execute(cur, """
         CREATE TABLE IF NOT EXISTS contracte_seq (
             an INTEGER PRIMARY KEY,
             last_ctr INTEGER NOT NULL DEFAULT 0
         )
     """)
 
-    cur.execute("""
+    _execute(cur, """
         CREATE TABLE IF NOT EXISTS registru_seq_client (
             client_id INTEGER PRIMARY KEY,
             last_nr INTEGER NOT NULL DEFAULT 0
         )
     """)
 
-    cur.execute("""
+    _execute(cur, """
         CREATE TABLE IF NOT EXISTS sarcini (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id INTEGER NOT NULL,
@@ -105,7 +172,7 @@ def _migrate_schema(conn: sqlite3.Connection):
         )
     """)
 
-    cur.execute("""
+    _execute(cur, """
         CREATE TABLE IF NOT EXISTS inregistrari (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id INTEGER NOT NULL,
@@ -122,6 +189,7 @@ def _migrate_schema(conn: sqlite3.Connection):
     _add_column_if_missing(conn, "lucrari", "adresa_judet", "TEXT")
     _add_column_if_missing(conn, "lucrari", "adresa_localitate", "TEXT")
     _add_column_if_missing(conn, "lucrari", "adresa_strada", "TEXT")
+    _add_column_if_missing(conn, "lucrari", "revision", "INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing(conn, "lucrari", "adresa_numar", "TEXT")
     _add_column_if_missing(conn, "lucrari", "adresa_bloc", "TEXT")
     _add_column_if_missing(conn, "lucrari", "adresa_apartament", "TEXT")
@@ -158,21 +226,24 @@ def _migrate_schema(conn: sqlite3.Connection):
     _add_column_if_missing(conn, "utilizatori", "must_change_password", "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "utilizatori", "created_at", "TEXT")
 
-    cur.execute("UPDATE utilizatori SET rol='birou' WHERE rol IS NULL OR TRIM(rol)=''")
-    cur.execute("UPDATE utilizatori SET activ=1 WHERE activ IS NULL")
-    cur.execute("UPDATE utilizatori SET must_change_password=0 WHERE must_change_password IS NULL")
-    cur.execute("UPDATE utilizatori SET rol='admin' WHERE username='admin'")
+    _execute(cur, "UPDATE utilizatori SET rol='birou' WHERE rol IS NULL OR TRIM(rol)=''")
+    _execute(cur, "UPDATE utilizatori SET activ=1 WHERE activ IS NULL")
+    _execute(cur, "UPDATE utilizatori SET must_change_password=0 WHERE must_change_password IS NULL")
+    _execute(cur, "UPDATE utilizatori SET rol='admin' WHERE username='admin'")
 
     conn.commit()
 
 
 def init_db():
+    if DATABASE_URL:
+        _init_postgres()
+        return
     _ensure_parent_dir(DB_PATH)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
 
-        c.execute("""
+        _execute(c, """
             CREATE TABLE IF NOT EXISTS utilizatori (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
@@ -184,7 +255,7 @@ def init_db():
             )
         """)
 
-        c.execute("""
+        _execute(c, """
             CREATE TABLE IF NOT EXISTS clienti (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nume TEXT,
@@ -212,7 +283,7 @@ def init_db():
             )
         """)
 
-        c.execute("""
+        _execute(c, """
             CREATE TABLE IF NOT EXISTS lucrari (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER,
@@ -227,7 +298,7 @@ def init_db():
             )
         """)
 
-        c.execute("""
+        _execute(c, """
             CREATE TABLE IF NOT EXISTS atasamente (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER NOT NULL,
@@ -238,7 +309,7 @@ def init_db():
             )
         """)
 
-        c.execute("""
+        _execute(c, """
             CREATE TABLE IF NOT EXISTS facturi (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER NOT NULL,
@@ -254,7 +325,7 @@ def init_db():
             )
         """)
 
-        c.execute("""
+        _execute(c, """
             CREATE TABLE IF NOT EXISTS plati (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER NOT NULL,
@@ -270,9 +341,9 @@ def init_db():
 
         _migrate_schema(conn)
 
-        c.execute("SELECT COUNT(*) FROM utilizatori")
+        _execute(c, "SELECT COUNT(*) FROM utilizatori")
         if c.fetchone()[0] == 0:
-            c.execute(
+            _execute(c,
                 """
                 INSERT INTO utilizatori (username, parola, rol, activ, must_change_password, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -291,9 +362,9 @@ def init_db():
 
 
 def login(user, pwd):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("""
+        _execute(c, """
             SELECT id, username, parola, rol, activ, must_change_password, created_at
             FROM utilizatori
             WHERE username=?
@@ -315,78 +386,43 @@ def login(user, pwd):
         return None
 
 
-def genereaza_nr_os(an: int | None = None) -> str:
-    if an is None:
-        an = datetime.datetime.now().year
-
-    with sqlite3.connect(DB_PATH) as conn:
+def _next_document_number(table: str, key_name: str, counter: str, key: int) -> int:
+    allowed = {("documente_seq", "an", "last_os"),
+               ("contracte_seq", "an", "last_ctr"),
+               ("registru_seq_client", "client_id", "last_nr")}
+    if (table, key_name, counter) not in allowed:
+        raise ValueError("Contor necunoscut.")
+    with closing(_connect()) as conn, conn:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
-        cur.execute("SELECT last_os FROM documente_seq WHERE an=?", (int(an),))
-        row = cur.fetchone()
-        if row is None:
-            last = 0
-            cur.execute("INSERT INTO documente_seq (an, last_os) VALUES (?, ?)", (int(an), 0))
-        else:
-            last = int(row[0] or 0)
+        _execute(cur, f"INSERT INTO {table} ({key_name}, {counter}) VALUES (?, 1) "
+                      f"ON CONFLICT ({key_name}) DO UPDATE SET {counter}={table}.{counter}+1 "
+                      f"RETURNING {counter}", (int(key),))
+        return int(cur.fetchone()[0])
 
-        new_val = last + 1
-        cur.execute("UPDATE documente_seq SET last_os=? WHERE an=?", (new_val, int(an)))
-        conn.commit()
 
-    return f"OS-{int(an)}-{new_val:04d}"
+def genereaza_nr_os(an: int | None = None) -> str:
+    year = int(an if an is not None else datetime.datetime.now().year)
+    value = _next_document_number("documente_seq", "an", "last_os", year)
+    return f"OS-{year}-{value:04d}"
 
 
 def genereaza_nr_contract(an: int | None = None) -> str:
-    if an is None:
-        an = datetime.datetime.now().year
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
-        cur.execute("SELECT last_ctr FROM contracte_seq WHERE an=?", (int(an),))
-        row = cur.fetchone()
-
-        if row is None:
-            last = 0
-            cur.execute("INSERT INTO contracte_seq (an, last_ctr) VALUES (?, ?)", (int(an), 0))
-        else:
-            last = int(row[0] or 0)
-
-        new_val = last + 1
-        cur.execute("UPDATE contracte_seq SET last_ctr=? WHERE an=?", (new_val, int(an)))
-        conn.commit()
-
-    return f"CTR-{int(an)}-{new_val:04d}"
+    year = int(an if an is not None else datetime.datetime.now().year)
+    value = _next_document_number("contracte_seq", "an", "last_ctr", year)
+    return f"CTR-{year}-{value:04d}"
 
 
 def genereaza_nr_inregistrare_client(client_id: int, an: int | None = None) -> str:
-    if an is None:
-        an = datetime.datetime.now().year
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
-        cur.execute("SELECT last_nr FROM registru_seq_client WHERE client_id=?", (int(client_id),))
-        row = cur.fetchone()
-        if row is None:
-            last = 0
-            cur.execute("INSERT INTO registru_seq_client (client_id, last_nr) VALUES (?, ?)", (int(client_id), 0))
-        else:
-            last = int(row[0] or 0)
-
-        new_val = last + 1
-        cur.execute("UPDATE registru_seq_client SET last_nr=? WHERE client_id=?", (new_val, int(client_id)))
-        conn.commit()
-
-    return f"REG-{int(client_id)}-{int(an)}-{new_val:04d}"
+    year = int(an if an is not None else datetime.datetime.now().year)
+    value = _next_document_number("registru_seq_client", "client_id", "last_nr", int(client_id))
+    return f"REG-{int(client_id)}-{year}-{value:04d}"
 
 
 def adauga_inregistrare(client_id: int, lucrare_id: int, sarcina_id: int | None, descriere: str, created_by: str) -> str:
     nr = genereaza_nr_inregistrare_client(int(client_id))
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("""
+        _execute(c, """
             INSERT INTO inregistrari (
                 client_id, lucrare_id, sarcina_id, nr_inregistrare, data, descriere, created_at, created_by
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -417,14 +453,29 @@ def lista_inregistrari(client_id: int, lucrare_id: int | None = None, sarcina_id
 
     q += " ORDER BY created_at DESC, id DESC"
 
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(q, conn, params=params)
+    with closing(_connect()) as conn, conn:
+        return _read_frame(q, conn, params=params)
+
+
+def _require_client(conn: sqlite3.Connection, client_id: int):
+    if _execute(conn, "SELECT 1 FROM clienti WHERE id=?", (int(client_id),)).fetchone() is None:
+        raise ValueError("Clientul nu exista.")
+
+
+def _positive_amount(value, label: str) -> float:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{label} trebuie sa fie un numar pozitiv finit.") from exc
+    if not math.isfinite(amount) or amount <= 0:
+        raise ValueError(f"{label} trebuie sa fie un numar pozitiv finit.")
+    return amount
 
 
 def adauga_client(valori: dict):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("""
+        _execute(c, """
             INSERT INTO clienti (
                 nume, email, telefon, firma, status, observatii, data_adaugarii, cod_intern, scor, remark,
                 domiciliu_judet, domiciliu_localitate, domiciliu_strada, domiciliu_numar, domiciliu_bloc, domiciliu_scara, domiciliu_etaj, domiciliu_apartament,
@@ -452,19 +503,30 @@ def adauga_client(valori: dict):
 
 
 def lista_clienti(filtru: str = "") -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         if filtru:
-            return pd.read_sql_query(
-                "SELECT * FROM clienti WHERE nume LIKE ? OR email LIKE ? ORDER BY data_adaugarii DESC, id DESC",
-                conn, params=[f"%{filtru}%", f"%{filtru}%"]
+            like = f"%{str(filtru).strip()}%"
+            return _read_frame(
+                """
+                SELECT * FROM clienti
+                WHERE
+                    nume LIKE ?
+                    OR email LIKE ?
+                    OR telefon LIKE ?
+                    OR firma LIKE ?
+                    OR cod_intern LIKE ?
+                ORDER BY data_adaugarii DESC, id DESC
+                """,
+                conn,
+                params=[like, like, like, like, like],
             )
-        return pd.read_sql_query("SELECT * FROM clienti ORDER BY data_adaugarii DESC, id DESC", conn)
+        return _read_frame("SELECT * FROM clienti ORDER BY data_adaugarii DESC, id DESC", conn)
 
 
 def modifica_client(id_cli: int, valori: dict):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("""UPDATE clienti SET 
+        _execute(c, """UPDATE clienti SET
             nume=?, email=?, telefon=?, firma=?, status=?, observatii=?, cod_intern=?, scor=?, remark=?,
             domiciliu_judet=?, domiciliu_localitate=?, domiciliu_strada=?, domiciliu_numar=?, domiciliu_bloc=?, domiciliu_scara=?, domiciliu_etaj=?, domiciliu_apartament=?,
             consum_judet=?, consum_localitate=?, consum_strada=?, consum_numar=?, consum_bloc=?, consum_apartament=?,
@@ -494,25 +556,25 @@ def modifica_client(id_cli: int, valori: dict):
 def dependinte_client(id_cli: int) -> dict:
     client_id = int(id_cli)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
 
-        c.execute("SELECT COUNT(*) FROM lucrari WHERE client_id=?", (client_id,))
+        _execute(c, "SELECT COUNT(*) FROM lucrari WHERE client_id=?", (client_id,))
         nr_lucrari = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM facturi WHERE client_id=?", (client_id,))
+        _execute(c, "SELECT COUNT(*) FROM facturi WHERE client_id=?", (client_id,))
         nr_facturi = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM plati WHERE client_id=?", (client_id,))
+        _execute(c, "SELECT COUNT(*) FROM plati WHERE client_id=?", (client_id,))
         nr_plati = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM atasamente WHERE client_id=?", (client_id,))
+        _execute(c, "SELECT COUNT(*) FROM atasamente WHERE client_id=?", (client_id,))
         nr_atasamente = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM inregistrari WHERE client_id=?", (client_id,))
+        _execute(c, "SELECT COUNT(*) FROM inregistrari WHERE client_id=?", (client_id,))
         nr_inregistrari = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM sarcini WHERE client_id=?", (client_id,))
+        _execute(c, "SELECT COUNT(*) FROM sarcini WHERE client_id=?", (client_id,))
         nr_sarcini = int(c.fetchone()[0] or 0)
 
     return {
@@ -539,9 +601,9 @@ def sterge_client(id_cli: int):
             "Clientul nu poate fi șters deoarece are date asociate: " + ", ".join(parts) + "."
         )
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("DELETE FROM clienti WHERE id=?", (client_id,))
+        _execute(c, "DELETE FROM clienti WHERE id=?", (client_id,))
         conn.commit()
 
 
@@ -558,8 +620,35 @@ def lista_atasamente(client_id: int, lucrare_id: int | None = None, sarcina_id: 
 
     q += " ORDER BY upload_date DESC, id DESC"
 
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(q, conn, params=params)
+    with closing(_connect()) as conn, conn:
+        return _read_frame(q, conn, params=params)
+
+
+def _sanitize_filename(filename: str) -> str:
+    name = os.path.basename(str(filename or "")).strip()
+    if not name:
+        raise ValueError("Nume fișier invalid.")
+
+    # normalize unicode -> ascii fallback
+    norm = unicodedata.normalize("NFKD", name)
+    ascii_name = norm.encode("ascii", "ignore").decode("ascii")
+
+    # keep safe chars only
+    ascii_name = re.sub(r"[^A-Za-z0-9._\- ]+", "_", ascii_name)
+    ascii_name = ascii_name.strip(" .")
+    if not ascii_name:
+        raise ValueError("Nume fișier invalid după sanitizare.")
+
+    # avoid hidden or reserved-like names
+    if ascii_name.startswith("."):
+        ascii_name = f"file{ascii_name}"
+
+    # hard cap length
+    if len(ascii_name) > 180:
+        base, ext = os.path.splitext(ascii_name)
+        ascii_name = base[:150] + ext[:30]
+
+    return ascii_name
 
 
 def _unique_filepath(folder: str, filename: str) -> tuple[str, str]:
@@ -591,17 +680,27 @@ def save_atasament(
     lucrare_id: int | None = None,
     sarcina_id: int | None = None
 ):
+    if content_bytes is None:
+        raise ValueError("Conținut fișier lipsă.")
+    if len(content_bytes) == 0:
+        raise ValueError("Fișierul este gol.")
+    if len(content_bytes) > MAX_UPLOAD_BYTES:
+        mb = MAX_UPLOAD_BYTES / (1024 * 1024)
+        raise ValueError(f"Fișier prea mare. Maxim permis: {mb:.0f} MB.")
+
+    safe_filename = _sanitize_filename(filename)
+
     upload_dir = os.path.join(UPLOAD_DIR, str(int(client_id)))
     os.makedirs(upload_dir, exist_ok=True)
 
-    filepath, final_filename = _unique_filepath(upload_dir, filename)
+    filepath, final_filename = _unique_filepath(upload_dir, safe_filename)
 
     with open(filepath, "wb") as f:
         f.write(content_bytes)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("""
+        _execute(c, """
             INSERT INTO atasamente (client_id, filename, path, uploaded_by, upload_date, lucrare_id, sarcina_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -617,16 +716,16 @@ def save_atasament(
 
 
 def sterge_atasament(atas_id: int):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT path FROM atasamente WHERE id=?", (int(atas_id),))
+        _execute(c, "SELECT path FROM atasamente WHERE id=?", (int(atas_id),))
         row = c.fetchone()
         if row and row[0] and os.path.exists(row[0]):
             try:
                 os.remove(row[0])
             except Exception:
                 pass
-        c.execute("DELETE FROM atasamente WHERE id=?", (int(atas_id),))
+        _execute(c, "DELETE FROM atasamente WHERE id=?", (int(atas_id),))
         conn.commit()
 
 
@@ -646,59 +745,97 @@ def _creeaza_flux_birou_pentru_lucrare(conn: sqlite3.Connection, client_id: int,
     steps = flux_sarcini_pentru_tip_lucrare(tip_lucrare)
     now = str(datetime.datetime.now())
     for i, tip in enumerate(steps, start=1):
-        c.execute("""
+        _execute(c, """
             INSERT INTO sarcini (client_id, lucrare_id, ordine, tip_sarcina, status, created_at, created_by)
             VALUES (?, ?, ?, ?, 'NOU', ?, ?)
         """, (int(client_id), int(lucrare_id), int(i), str(tip), now, created_by or ""))
 
 
 def adauga_lucrare(valori: dict):
-    with sqlite3.connect(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO lucrari (
-                client_id, tip_lucrare, valoare_contractata, avans, responsabil,
-                status, data_contract, data_programare, observatii, descriere,
-                adresa_judet, adresa_localitate, adresa_strada, adresa_numar, adresa_bloc, adresa_apartament,
-                interval_orar, echipa, sef_echipa,
-                cod_atr, executant, element_sda, comanda_aprovizionare,
-                diriginte_santier, contract_prestari_servicii, numar_conventie_tehnica,
-                data_programare_pif, interval_orar_pif, echipa_pif, sef_echipa_pif
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            int(valori["client_id"]),
-            valori.get("tip_lucrare", ""),
-            float(valori.get("valoare_contractata", 0) or 0),
-            float(valori.get("avans", 0) or 0),
-            valori.get("responsabil", ""),
-            valori.get("status", ""),
-            valori.get("data_contract", ""),
-            valori.get("data_programare", ""),
-            valori.get("observatii", ""),
-            valori.get("descriere", ""),
-            valori.get("adresa_judet", ""),
-            valori.get("adresa_localitate", ""),
-            valori.get("adresa_strada", ""),
-            valori.get("adresa_numar", ""),
-            valori.get("adresa_bloc", ""),
-            valori.get("adresa_apartament", ""),
-            valori.get("interval_orar", ""),
-            valori.get("echipa", ""),
-            valori.get("sef_echipa", ""),
-            valori.get("cod_atr", ""),
-            valori.get("executant", ""),
-            valori.get("element_sda", ""),
-            valori.get("comanda_aprovizionare", ""),
-            valori.get("diriginte_santier", ""),
-            valori.get("contract_prestari_servicii", ""),
-            valori.get("numar_conventie_tehnica", ""),
-            valori.get("data_programare_pif", ""),
-            valori.get("interval_orar_pif", ""),
-            valori.get("echipa_pif", ""),
-            valori.get("sef_echipa_pif", ""),
-        ))
+    columns = [
+        "client_id",
+        "tip_lucrare",
+        "valoare_contractata",
+        "avans",
+        "responsabil",
+        "status",
+        "data_contract",
+        "data_programare",
+        "observatii",
+        "descriere",
+        "adresa_judet",
+        "adresa_localitate",
+        "adresa_strada",
+        "adresa_numar",
+        "adresa_bloc",
+        "adresa_apartament",
+        "interval_orar",
+        "echipa",
+        "sef_echipa",
+        "cod_atr",
+        "executant",
+        "element_sda",
+        "comanda_aprovizionare",
+        "diriginte_santier",
+        "contract_prestari_servicii",
+        "numar_conventie_tehnica",
+        "data_programare_pif",
+        "interval_orar_pif",
+        "echipa_pif",
+        "sef_echipa_pif",
+    ]
 
-        lucrare_id = int(c.lastrowid)
+    values = (
+        int(valori["client_id"]),
+        valori.get("tip_lucrare", ""),
+        float(valori.get("valoare_contractata", 0) or 0),
+        float(valori.get("avans", 0) or 0),
+        valori.get("responsabil", ""),
+        valori.get("status", ""),
+        valori.get("data_contract", ""),
+        valori.get("data_programare", ""),
+        valori.get("observatii", ""),
+        valori.get("descriere", ""),
+        valori.get("adresa_judet", ""),
+        valori.get("adresa_localitate", ""),
+        valori.get("adresa_strada", ""),
+        valori.get("adresa_numar", ""),
+        valori.get("adresa_bloc", ""),
+        valori.get("adresa_apartament", ""),
+        valori.get("interval_orar", ""),
+        valori.get("echipa", ""),
+        valori.get("sef_echipa", ""),
+        valori.get("cod_atr", ""),
+        valori.get("executant", ""),
+        valori.get("element_sda", ""),
+        valori.get("comanda_aprovizionare", ""),
+        valori.get("diriginte_santier", ""),
+        valori.get("contract_prestari_servicii", ""),
+        valori.get("numar_conventie_tehnica", ""),
+        valori.get("data_programare_pif", ""),
+        valori.get("interval_orar_pif", ""),
+        valori.get("echipa_pif", ""),
+        valori.get("sef_echipa_pif", ""),
+    )
+
+    # --- SELF-CHECK anti "X values for Y columns"
+    if len(columns) != len(values):
+        raise ValueError(
+            f"[adauga_lucrare] Mismatch coloane/valori: {len(columns)} coloane vs {len(values)} valori."
+        )
+
+    placeholders = ", ".join(["?"] * len(columns))
+    cols_sql = ", ".join(columns)
+
+    with closing(_connect()) as conn, conn:
+        _require_client(conn, int(valori["client_id"]))
+        c = conn.cursor()
+        _execute(c,
+            f"INSERT INTO lucrari ({cols_sql}) VALUES ({placeholders}) RETURNING id",
+            values
+        )
+
+        lucrare_id = int(c.fetchone()[0])
         _creeaza_flux_birou_pentru_lucrare(
             conn=conn,
             client_id=int(valori["client_id"]),
@@ -711,13 +848,13 @@ def adauga_lucrare(valori: dict):
 
 
 def lista_lucrari() -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query("SELECT * FROM lucrari ORDER BY data_contract DESC, id DESC", conn)
+    with closing(_connect()) as conn, conn:
+        return _read_frame("SELECT * FROM lucrari ORDER BY data_contract DESC, id DESC", conn)
 
 
 def lista_lucrari_client(client_id: int) -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(
+    with closing(_connect()) as conn, conn:
+        return _read_frame(
             "SELECT * FROM lucrari WHERE client_id=? ORDER BY data_contract DESC, id DESC",
             conn,
             params=[int(client_id)],
@@ -725,76 +862,123 @@ def lista_lucrari_client(client_id: int) -> pd.DataFrame:
 
 
 def get_lucrare(lucrare_id: int) -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
+    with closing(_connect()) as conn, conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM lucrari WHERE id=?", (int(lucrare_id),))
+        _execute(cur, "SELECT * FROM lucrari WHERE id=?", (int(lucrare_id),))
         row = cur.fetchone()
-        return dict(row) if row else None
+        return dict(zip([col[0] for col in cur.description], row)) if row else None
 
 
-def modifica_lucrare(lucrare_id: int, valori: dict):
-    with sqlite3.connect(DB_PATH) as conn:
+def modifica_lucrare(lucrare_id: int, valori: dict, *, expected_revision: int):
+    # Require the revision captured when opening the form, never a fresh read.
+    if type(expected_revision) is not int or expected_revision < 0:
+        raise ValueError("Versiunea lucrarii este invalida. Redeschide editarea.")
+    set_columns = [
+        "client_id",
+        "tip_lucrare",
+        "valoare_contractata",
+        "avans",
+        "responsabil",
+        "status",
+        "data_contract",
+        "data_programare",
+        "observatii",
+        "descriere",
+        "adresa_judet",
+        "adresa_localitate",
+        "adresa_strada",
+        "adresa_numar",
+        "adresa_bloc",
+        "adresa_apartament",
+        "interval_orar",
+        "echipa",
+        "sef_echipa",
+        "cod_atr",
+        "executant",
+        "element_sda",
+        "comanda_aprovizionare",
+        "diriginte_santier",
+        "contract_prestari_servicii",
+        "numar_conventie_tehnica",
+        "data_programare_pif",
+        "interval_orar_pif",
+        "echipa_pif",
+        "sef_echipa_pif",
+    ]
+
+    set_values = (
+        int(valori["client_id"]),
+        valori.get("tip_lucrare", ""),
+        float(valori.get("valoare_contractata", 0) or 0),
+        float(valori.get("avans", 0) or 0),
+        valori.get("responsabil", ""),
+        valori.get("status", ""),
+        valori.get("data_contract", ""),
+        valori.get("data_programare", ""),
+        valori.get("observatii", ""),
+        valori.get("descriere", ""),
+        valori.get("adresa_judet", ""),
+        valori.get("adresa_localitate", ""),
+        valori.get("adresa_strada", ""),
+        valori.get("adresa_numar", ""),
+        valori.get("adresa_bloc", ""),
+        valori.get("adresa_apartament", ""),
+        valori.get("interval_orar", ""),
+        valori.get("echipa", ""),
+        valori.get("sef_echipa", ""),
+        valori.get("cod_atr", ""),
+        valori.get("executant", ""),
+        valori.get("element_sda", ""),
+        valori.get("comanda_aprovizionare", ""),
+        valori.get("diriginte_santier", ""),
+        valori.get("contract_prestari_servicii", ""),
+        valori.get("numar_conventie_tehnica", ""),
+        valori.get("data_programare_pif", ""),
+        valori.get("interval_orar_pif", ""),
+        valori.get("echipa_pif", ""),
+        valori.get("sef_echipa_pif", ""),
+    )
+
+    # --- SELF-CHECK anti mismatch
+    if len(set_columns) != len(set_values):
+        raise ValueError(
+            f"[modifica_lucrare] Mismatch coloane/valori: {len(set_columns)} coloane vs {len(set_values)} valori."
+        )
+
+    set_sql = ", ".join([f"{col}=?" for col in set_columns])
+    params = set_values + (int(lucrare_id), expected_revision)
+
+    with closing(_connect()) as conn, conn:
+        _require_client(conn, int(valori["client_id"]))
         c = conn.cursor()
-        c.execute("""
-            UPDATE lucrari SET
-                client_id=?, tip_lucrare=?, valoare_contractata=?, avans=?, responsabil=?,
-                status=?, data_contract=?, data_programare=?, observatii=?, descriere=?,
-                adresa_judet=?, adresa_localitate=?, adresa_strada=?, adresa_numar=?, adresa_bloc=?, adresa_apartament=?,
-                interval_orar=?, echipa=?, sef_echipa=?,
-                cod_atr=?, executant=?, element_sda=?, comanda_aprovizionare=?,
-                diriginte_santier=?, contract_prestari_servicii=?, numar_conventie_tehnica=?,
-                data_programare_pif=?, interval_orar_pif=?, echipa_pif=?, sef_echipa_pif=?
-            WHERE id=?
-        """, (
-            int(valori["client_id"]),
-            valori.get("tip_lucrare", ""),
-            float(valori.get("valoare_contractata", 0) or 0),
-            float(valori.get("avans", 0) or 0),
-            valori.get("responsabil", ""),
-            valori.get("status", ""),
-            valori.get("data_contract", ""),
-            valori.get("data_programare", ""),
-            valori.get("observatii", ""),
-            valori.get("descriere", ""),
-            valori.get("adresa_judet", ""),
-            valori.get("adresa_localitate", ""),
-            valori.get("adresa_strada", ""),
-            valori.get("adresa_numar", ""),
-            valori.get("adresa_bloc", ""),
-            valori.get("adresa_apartament", ""),
-            valori.get("interval_orar", ""),
-            valori.get("echipa", ""),
-            valori.get("sef_echipa", ""),
-            valori.get("cod_atr", ""),
-            valori.get("executant", ""),
-            valori.get("element_sda", ""),
-            valori.get("comanda_aprovizionare", ""),
-            valori.get("diriginte_santier", ""),
-            valori.get("contract_prestari_servicii", ""),
-            valori.get("numar_conventie_tehnica", ""),
-            valori.get("data_programare_pif", ""),
-            valori.get("interval_orar_pif", ""),
-            valori.get("echipa_pif", ""),
-            valori.get("sef_echipa_pif", ""),
-            int(lucrare_id),
-        ))
+        # One conditional write makes the check atomic even across processes.
+        _execute(c,
+            f"UPDATE lucrari SET {set_sql}, revision=revision+1 WHERE id=? AND revision=?",
+            params,
+        )
+        if c.rowcount != 1:
+            raise ConcurrentWorkEditError(
+                "Lucrarea a fost modificată în altă sesiune sau a fost ștearsă. "
+                "Modificările tale nu au fost salvate. Copiază textul pe care vrei "
+                "să-l păstrezi, apoi reîncarcă lucrarea."
+            )
         conn.commit()
+    return expected_revision + 1
 
 
 def dependinte_lucrare(lucrare_id: int) -> dict:
     lid = int(lucrare_id)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
 
-        c.execute("SELECT COUNT(*) FROM sarcini WHERE lucrare_id=?", (lid,))
+        _execute(c, "SELECT COUNT(*) FROM sarcini WHERE lucrare_id=?", (lid,))
         nr_sarcini = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM inregistrari WHERE lucrare_id=?", (lid,))
+        _execute(c, "SELECT COUNT(*) FROM inregistrari WHERE lucrare_id=?", (lid,))
         nr_inregistrari = int(c.fetchone()[0] or 0)
 
-        c.execute("SELECT COUNT(*) FROM atasamente WHERE lucrare_id=?", (lid,))
+        _execute(c, "SELECT COUNT(*) FROM atasamente WHERE lucrare_id=?", (lid,))
         nr_atasamente = int(c.fetchone()[0] or 0)
 
     return {
@@ -818,15 +1002,15 @@ def sterge_lucrare(lucrare_id: int):
             "Lucrarea nu poate fi ștearsă deoarece are date asociate: " + ", ".join(parts) + "."
         )
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("DELETE FROM lucrari WHERE id=?", (lid,))
+        _execute(c, "DELETE FROM lucrari WHERE id=?", (lid,))
         conn.commit()
 
 
 def lista_sarcini_lucrare(lucrare_id: int) -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(
+    with closing(_connect()) as conn, conn:
+        return _read_frame(
             "SELECT * FROM sarcini WHERE lucrare_id=? ORDER BY COALESCE(ordine, id) ASC",
             conn,
             params=[int(lucrare_id)],
@@ -860,8 +1044,8 @@ def lista_sarcini_all(filtru_status: str = "", filtru_text: str = "") -> pd.Data
 
     q += " ORDER BY s.created_at DESC, s.id DESC"
 
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(q, conn, params=params)
+    with closing(_connect()) as conn, conn:
+        return _read_frame(q, conn, params=params)
 
 
 def update_sarcina(
@@ -901,15 +1085,15 @@ def update_sarcina(
 
     params.append(int(sarcina_id))
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute(f"UPDATE sarcini SET {', '.join(fields)} WHERE id=?", params)
+        _execute(c, f"UPDATE sarcini SET {', '.join(fields)} WHERE id=?", params)
         conn.commit()
 
 
 def lista_facturi(client_id: int) -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(
+    with closing(_connect()) as conn, conn:
+        return _read_frame(
             "SELECT * FROM facturi WHERE client_id=? ORDER BY data_emiterii DESC, id DESC",
             conn,
             params=[int(client_id)],
@@ -917,9 +1101,11 @@ def lista_facturi(client_id: int) -> pd.DataFrame:
 
 
 def adauga_factura(valori: dict):
-    with sqlite3.connect(DB_PATH) as conn:
+    total = _positive_amount(valori.get("total"), "Totalul facturii")
+    with closing(_connect()) as conn, conn:
+        _require_client(conn, int(valori["client_id"]))
         c = conn.cursor()
-        c.execute("""
+        _execute(c, """
             INSERT INTO facturi (
                 client_id, numar, data_emiterii, data_scadenta, total, moneda, status,
                 observatii, created_at, created_by
@@ -929,7 +1115,7 @@ def adauga_factura(valori: dict):
             valori.get("numar", ""),
             valori.get("data_emiterii", ""),
             valori.get("data_scadenta", ""),
-            float(valori.get("total", 0) or 0),
+            total,
             valori.get("moneda", "RON"),
             valori.get("status", "NEINCASATA"),
             valori.get("observatii", ""),
@@ -940,74 +1126,77 @@ def adauga_factura(valori: dict):
 
 
 def anuleaza_factura(factura_id: int):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("UPDATE facturi SET status='ANULATA' WHERE id=?", (int(factura_id),))
+        _execute(c, "UPDATE facturi SET status='ANULATA' WHERE id=?", (int(factura_id),))
         conn.commit()
 
 
 def sterge_factura(factura_id: int):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
+        _lock_invoice(conn, int(factura_id))
         c = conn.cursor()
-        c.execute("DELETE FROM plati WHERE factura_id=?", (int(factura_id),))
-        c.execute("DELETE FROM facturi WHERE id=?", (int(factura_id),))
+        _execute(c, "DELETE FROM plati WHERE factura_id=?", (int(factura_id),))
+        _execute(c, "DELETE FROM facturi WHERE id=?", (int(factura_id),))
         conn.commit()
 
 
 def lista_plati(client_id: int) -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query(
+    with closing(_connect()) as conn, conn:
+        return _read_frame(
             "SELECT * FROM plati WHERE client_id=? ORDER BY data_platii DESC, id DESC",
             conn,
             params=[int(client_id)],
         )
 
 
+def _lock_invoice(conn, factura_id: int):
+    if DATABASE_URL:
+        _execute(conn, "SELECT id FROM facturi WHERE id=? FOR UPDATE", (int(factura_id),))
+    else:
+        _execute(conn, "BEGIN IMMEDIATE")
+
+
+def _recalculate_invoice(conn, factura_id: int):
+    cur = conn.cursor()
+    _execute(cur, "SELECT COALESCE(total, 0), status FROM facturi WHERE id=?", (int(factura_id),))
+    row = cur.fetchone()
+    if not row or row[1] == "ANULATA":
+        return
+    total = row[0]
+    _execute(cur, "SELECT COALESCE(SUM(suma), 0) FROM plati WHERE factura_id=?", (int(factura_id),))
+    paid = cur.fetchone()[0]
+    status = "NEINCASATA" if paid <= 0 else ("PARTIAL" if paid < total else "INCASATA")
+    _execute(cur, "UPDATE facturi SET status=? WHERE id=?", (status, int(factura_id)))
+
+
 def recalculeaza_status_factura(factura_id: int):
-    with sqlite3.connect(DB_PATH) as conn:
-        c = conn.cursor()
-
-        c.execute("SELECT COALESCE(total, 0), status FROM facturi WHERE id=?", (int(factura_id),))
-        row = c.fetchone()
-        if not row:
-            return
-        total, status_curent = float(row[0] or 0), str(row[1] or "NEINCASATA")
-
-        if status_curent == "ANULATA":
-            return
-
-        c.execute("SELECT COALESCE(SUM(suma), 0) FROM plati WHERE factura_id=?", (int(factura_id),))
-        incasat = float(c.fetchone()[0] or 0)
-
-        if total <= 0:
-            status_nou = "NEINCASATA"
-        elif incasat <= 0:
-            status_nou = "NEINCASATA"
-        elif incasat + 1e-9 < total:
-            status_nou = "PARTIAL"
-        else:
-            status_nou = "INCASATA"
-
-        c.execute("UPDATE facturi SET status=? WHERE id=?", (status_nou, int(factura_id)))
-        conn.commit()
+    with closing(_connect()) as conn, conn:
+        _lock_invoice(conn, int(factura_id))
+        _recalculate_invoice(conn, int(factura_id))
 
 
 def adauga_plata(valori: dict):
     factura_id = valori.get("factura_id", None)
     if factura_id is None:
         raise ValueError("factura_id este obligatoriu pentru o plată.")
+    suma = _positive_amount(valori.get("suma"), "Suma platii")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
+        _lock_invoice(conn, int(factura_id))
+        _require_client(conn, int(valori["client_id"]))
         c = conn.cursor()
 
-        c.execute("SELECT status FROM facturi WHERE id=?", (int(factura_id),))
+        _execute(c, "SELECT status, client_id FROM facturi WHERE id=?", (int(factura_id),))
         row = c.fetchone()
         if not row:
             raise ValueError("Factura nu există.")
         if str(row[0]) == "ANULATA":
             raise ValueError("Nu poți adăuga plată pe o factură ANULATĂ.")
+        if int(row[1]) != int(valori["client_id"]):
+            raise ValueError("Clientul platii nu corespunde clientului facturii.")
 
-        c.execute("""
+        _execute(c, """
             INSERT INTO plati (
                 client_id, factura_id, data_platii, suma, metoda, observatii, created_at, created_by
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1015,35 +1204,35 @@ def adauga_plata(valori: dict):
             int(valori["client_id"]),
             int(factura_id),
             valori.get("data_platii", ""),
-            float(valori.get("suma", 0) or 0),
+            suma,
             valori.get("metoda", ""),
             valori.get("observatii", ""),
             str(datetime.datetime.now()),
             valori.get("created_by", ""),
         ))
+        _recalculate_invoice(conn, int(factura_id))
         conn.commit()
-
-    recalculeaza_status_factura(int(factura_id))
 
 
 def sterge_plata(plata_id: int):
-    factura_id = None
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT factura_id FROM plati WHERE id=?", (int(plata_id),))
+        if not DATABASE_URL:
+            _execute(c, "BEGIN IMMEDIATE")
+        _execute(c, "SELECT factura_id FROM plati WHERE id=?", (int(plata_id),))
         row = c.fetchone()
-        if row:
-            factura_id = row[0]
-        c.execute("DELETE FROM plati WHERE id=?", (int(plata_id),))
-        conn.commit()
-
-    if factura_id is not None:
-        recalculeaza_status_factura(int(factura_id))
+        if row is None:
+            return
+        factura_id = int(row[0])
+        if DATABASE_URL:
+            _lock_invoice(conn, factura_id)
+        _execute(c, "DELETE FROM plati WHERE id=?", (int(plata_id),))
+        _recalculate_invoice(conn, factura_id)
 
 
 def rezumat_facturi_client(client_id: int) -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query("""
+    with closing(_connect()) as conn, conn:
+        return _read_frame("""
             SELECT
                 f.id,
                 f.client_id,
@@ -1065,20 +1254,20 @@ def rezumat_facturi_client(client_id: int) -> pd.DataFrame:
 
 
 def calculeaza_sold_client(client_id: int) -> float:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT COALESCE(SUM(total), 0) FROM facturi WHERE client_id=? AND status!='ANULATA'", (int(client_id),))
+        _execute(c, "SELECT COALESCE(SUM(total), 0) FROM facturi WHERE client_id=? AND status!='ANULATA'", (int(client_id),))
         total_facturi = float(c.fetchone()[0] or 0)
-        c.execute("SELECT COALESCE(SUM(suma), 0) FROM plati WHERE client_id=?", (int(client_id),))
+        _execute(c, "SELECT COALESCE(SUM(suma), 0) FROM plati WHERE client_id=?", (int(client_id),))
         total_plati = float(c.fetchone()[0] or 0)
         return total_facturi - total_plati
 
 
 def solduri_pe_clienti() -> dict:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
 
-        c.execute("""
+        _execute(c, """
             SELECT client_id, COALESCE(SUM(total), 0)
             FROM facturi
             WHERE status != 'ANULATA'
@@ -1086,7 +1275,7 @@ def solduri_pe_clienti() -> dict:
         """)
         facturi = {int(cid): float(total or 0) for cid, total in c.fetchall()}
 
-        c.execute("""
+        _execute(c, """
             SELECT client_id, COALESCE(SUM(suma), 0)
             FROM plati
             GROUP BY client_id
@@ -1101,9 +1290,9 @@ def solduri_pe_clienti() -> dict:
 
 
 def facturat_pe_clienti() -> dict:
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("""
+        _execute(c, """
             SELECT client_id, COALESCE(SUM(total), 0)
             FROM facturi
             WHERE status != 'ANULATA'
@@ -1112,9 +1301,55 @@ def facturat_pe_clienti() -> dict:
         return {int(cid): float(total or 0) for cid, total in c.fetchall()}
 
 
+def agregate_financiare_clienti() -> pd.DataFrame:
+    """
+    Returnează un DataFrame cu:
+      client_id, valoare_contract, facturat, platit, sold
+    - valoare_contract: SUM(lucrari.valoare_contractata)
+    - facturat: SUM(facturi.total) pentru facturi != ANULATA
+    - platit: SUM(plati.suma)
+    - sold: facturat - platit
+    """
+    q = """
+    WITH
+    c_lucrari AS (
+        SELECT client_id, COALESCE(SUM(valoare_contractata), 0) AS valoare_contract
+        FROM lucrari
+        GROUP BY client_id
+    ),
+    c_facturi AS (
+        SELECT client_id, COALESCE(SUM(total), 0) AS facturat
+        FROM facturi
+        WHERE status != 'ANULATA'
+        GROUP BY client_id
+    ),
+    c_plati AS (
+        SELECT client_id, COALESCE(SUM(suma), 0) AS platit
+        FROM plati
+        GROUP BY client_id
+    ),
+    ids AS (
+        SELECT id AS client_id FROM clienti
+    )
+    SELECT
+        ids.client_id,
+        COALESCE(c_lucrari.valoare_contract, 0) AS valoare_contract,
+        COALESCE(c_facturi.facturat, 0) AS facturat,
+        COALESCE(c_plati.platit, 0) AS platit,
+        (COALESCE(c_facturi.facturat, 0) - COALESCE(c_plati.platit, 0)) AS sold
+    FROM ids
+    LEFT JOIN c_lucrari ON c_lucrari.client_id = ids.client_id
+    LEFT JOIN c_facturi ON c_facturi.client_id = ids.client_id
+    LEFT JOIN c_plati ON c_plati.client_id = ids.client_id
+    """
+
+    with closing(_connect()) as conn, conn:
+        return _read_frame(q, conn)
+
+
 def lista_utilizatori() -> pd.DataFrame:
-    with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql_query("""
+    with closing(_connect()) as conn, conn:
+        return _read_frame("""
             SELECT
                 id,
                 username,
@@ -1128,10 +1363,9 @@ def lista_utilizatori() -> pd.DataFrame:
 
 
 def get_utilizator(username: str) -> dict | None:
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
+    with closing(_connect()) as conn, conn:
         cur = conn.cursor()
-        cur.execute("""
+        _execute(cur, """
             SELECT
                 id,
                 username,
@@ -1144,7 +1378,7 @@ def get_utilizator(username: str) -> dict | None:
             WHERE username=?
         """, (username,))
         row = cur.fetchone()
-        return dict(row) if row else None
+        return dict(zip([col[0] for col in cur.description], row)) if row else None
 
 
 def adauga_utilizator(username: str, parola: str, rol: str = "birou", activ: int = 1, must_change_password: int = 1):
@@ -1153,16 +1387,18 @@ def adauga_utilizator(username: str, parola: str, rol: str = "birou", activ: int
 
     if not username:
         raise ValueError("Username-ul este obligatoriu.")
-    if not parola:
-        raise ValueError("Parola este obligatorie.")
+    if len(parola) < 8:
+        raise ValueError("Parola trebuie sa aiba minimum 8 caractere.")
+    if rol not in {"admin", "birou", "vizualizare"}:
+        raise ValueError("Rol invalid.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT id FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT id FROM utilizatori WHERE username=?", (username,))
         if c.fetchone():
             raise ValueError("Există deja un utilizator cu acest username.")
 
-        c.execute("""
+        _execute(c, """
             INSERT INTO utilizatori (username, parola, rol, activ, must_change_password, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (
@@ -1182,12 +1418,12 @@ def schimba_parola(username: str, parola_veche: str, parola_noua: str):
 
     if not username:
         raise ValueError("Username invalid.")
-    if not parola_noua:
-        raise ValueError("Parola nouă este obligatorie.")
+    if len(parola_noua) < 8:
+        raise ValueError("Parola noua trebuie sa aiba minimum 8 caractere.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT parola FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT parola FROM utilizatori WHERE username=?", (username,))
         row = c.fetchone()
         if not row:
             raise ValueError("Utilizatorul nu există.")
@@ -1196,7 +1432,7 @@ def schimba_parola(username: str, parola_veche: str, parola_noua: str):
         if not verify_password(str(parola_veche or ""), stored_password):
             raise ValueError("Parola veche este incorectă.")
 
-        c.execute("""
+        _execute(c, """
             UPDATE utilizatori
             SET parola=?, must_change_password=0
             WHERE username=?
@@ -1213,16 +1449,16 @@ def reseteaza_parola_admin(username: str, parola_noua: str, must_change_password
 
     if not username:
         raise ValueError("Username invalid.")
-    if not parola_noua:
-        raise ValueError("Parola nouă este obligatorie.")
+    if len(parola_noua) < 8:
+        raise ValueError("Parola noua trebuie sa aiba minimum 8 caractere.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT id FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT id FROM utilizatori WHERE username=?", (username,))
         if not c.fetchone():
             raise ValueError("Utilizatorul nu există.")
 
-        c.execute("""
+        _execute(c, """
             UPDATE utilizatori
             SET parola=?, must_change_password=?
             WHERE username=?
@@ -1240,32 +1476,36 @@ def seteaza_rol_utilizator(username: str, rol: str):
 
     if not username:
         raise ValueError("Username invalid.")
-    if not rol:
-        raise ValueError("Rolul este obligatoriu.")
+    if rol not in {"admin", "birou", "vizualizare"}:
+        raise ValueError("Rol invalid.")
+    if username.lower() == "admin" and rol != "admin":
+        raise ValueError("Contul admin trebuie sa pastreze rolul admin.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT id FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT id FROM utilizatori WHERE username=?", (username,))
         if not c.fetchone():
             raise ValueError("Utilizatorul nu există.")
 
-        c.execute("UPDATE utilizatori SET rol=? WHERE username=?", (rol, username))
+        _execute(c, "UPDATE utilizatori SET rol=? WHERE username=?", (rol, username))
         conn.commit()
 
 
 def seteaza_activ_utilizator(username: str, activ: int):
     username = str(username or "").strip()
+    if username.lower() == "admin" and not activ:
+        raise ValueError("Contul admin nu poate fi dezactivat.")
 
     if not username:
         raise ValueError("Username invalid.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT id FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT id FROM utilizatori WHERE username=?", (username,))
         if not c.fetchone():
             raise ValueError("Utilizatorul nu există.")
 
-        c.execute("UPDATE utilizatori SET activ=? WHERE username=?", (int(1 if activ else 0), username))
+        _execute(c, "UPDATE utilizatori SET activ=? WHERE username=?", (int(1 if activ else 0), username))
         conn.commit()
 
 
@@ -1277,9 +1517,9 @@ def sterge_utilizator(username: str):
     if username.lower() == "admin":
         raise ValueError("Utilizatorul admin nu poate fi șters.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("DELETE FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "DELETE FROM utilizatori WHERE username=?", (username,))
         conn.commit()
 
 
@@ -1289,13 +1529,13 @@ def seteaza_must_change_password(username: str, must_change_password: int):
     if not username:
         raise ValueError("Username invalid.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT id FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT id FROM utilizatori WHERE username=?", (username,))
         if not c.fetchone():
             raise ValueError("Utilizatorul nu există.")
 
-        c.execute(
+        _execute(c,
             "UPDATE utilizatori SET must_change_password=? WHERE username=?",
             (int(1 if must_change_password else 0), username),
         )
@@ -1308,16 +1548,16 @@ def schimba_parola_fara_verificare_admin(username: str, parola_noua: str, must_c
 
     if not username:
         raise ValueError("Username invalid.")
-    if not parola_noua:
-        raise ValueError("Parola nouă este obligatorie.")
+    if len(parola_noua) < 8:
+        raise ValueError("Parola noua trebuie sa aiba minimum 8 caractere.")
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(_connect()) as conn, conn:
         c = conn.cursor()
-        c.execute("SELECT id FROM utilizatori WHERE username=?", (username,))
+        _execute(c, "SELECT id FROM utilizatori WHERE username=?", (username,))
         if not c.fetchone():
             raise ValueError("Utilizatorul nu există.")
 
-        c.execute("""
+        _execute(c, """
             UPDATE utilizatori
             SET parola=?, must_change_password=?
             WHERE username=?
@@ -1327,3 +1567,8 @@ def schimba_parola_fara_verificare_admin(username: str, parola_noua: str, must_c
             username,
         ))
         conn.commit()
+
+
+# Enforce application permissions before any mutation, including stale forms.
+from db.permissions import protect_functions as _protect_functions
+_protect_functions(globals())

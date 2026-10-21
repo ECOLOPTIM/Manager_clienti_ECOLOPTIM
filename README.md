@@ -1,3 +1,6 @@
+> Ramura de validare locala PostgreSQL: vezi [instructiunile de test](README_POSTGRES_TEST.txt)
+> si [rezultatele consolidate](docs/VALIDARE_2026-10-22.md). Actualizarea web necesita o decizie separata.
+
 # Manager clienți / lucrări — ECOLOPTIM
 
 Aplicație Streamlit pentru administrarea:

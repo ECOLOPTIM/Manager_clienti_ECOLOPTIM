@@ -1,0 +1,60 @@
+ECOLOPTIM - CHECKPOINT COD SI VALIDARE LOCALA - 21.10.2026
+
+SURSA DOVEZILOR
+Rezultatele PostgreSQL si probele manuale au fost executate de utilizator
+pe calculatorul sau Windows si confirmate in conversatie.
+Serverul PostgreSQL nu a fost executat in mediul asistentului.
+
+REZULTATE CONFIRMATE PE WINDOWS
+- 23 teste PostgreSQL: OK (12.341 secunde).
+- Client TEST POSTGRES 01 creat si afisat.
+- Doua lucrari distincte: 1000 lei si 2000 lei, total 3000 lei.
+- Raportul Lucrari afiseaza atat o singura valoare, cat si valori diferite.
+- Factura TEST-PG-F001: 1000 lei.
+- Incasari 300 + 700 lei: sold 0, status INCASATA.
+- Datele au fost pastrate dupa oprirea si repornirea aplicatiei.
+- Editare aceeasi lucrare din doua sesiuni: a doua salvare este blocata,
+  prima modificare se pastreaza; dupa reincarcare editarea functioneaza.
+- Contul test_birou vede clientul si lucrarile.
+- Admin si test_birou au salvat modificari pe lucrari diferite; ambele s-au pastrat.
+- PROBA BACKUP SI RESTAURARE: OK, confirmat de utilizator.
+  Scriptul a comparat toate randurile si structura si a verificat contoarele ID.
+  Baza restaurata este separata; baza aplicatiei a ramas sursa initiala.
+  Raport pe calculatorul utilizatorului:
+  D:\Aplicatii\Manager_clienti_ECOLOPTIM_PG_TEST\backups\ecoloptim_pg_test_20261021205221_e09076be_verificare.json
+
+VERIFICARI IN MEDIUL DE DEZVOLTARE
+- 38 teste SQLite: OK.
+- 2 teste Streamlit pentru editarea din sesiuni separate: OK.
+- 6 teste ale raportului Lucrari, inclusiv valori egale si zecimale: OK.
+- 8 teste ale helperelor de backup si ale limitelor restaurarii: OK.
+- Pornirea paginii de autentificare cu baza SQLite temporara: OK.
+Aceste suite au fost rulate la momentele corectiilor respective, nu ca o
+singura rulare consolidata pe un server PostgreSQL al asistentului.
+
+CORECTII CONSOLIDATE
+- Inchiderea explicita a conexiunilor si validarea client/factura/plata.
+- Compatibilitate formatare financiar cu Styler.map.
+- Verificarea atomica a versiunii lucrarii la salvare si pastrarea versiunii
+  originale a formularului intre rerularile Streamlit.
+- Conectare PostgreSQL, schema versionata, chei straine si sume NUMERIC(14,2).
+- Contoare atomice; plata si statusul facturii in aceeasi tranzactie.
+- Testul concurent foloseste conexiunea configurata, inclusiv PostgreSQL.
+- Raport Lucrari: limita unica afisata ca text, slider numai pentru limite
+  diferite; filtrare corecta a valorilor cu zecimale.
+- Script local pentru pg_dump, restaurare separata si compararea datelor.
+
+CONTINUTUL ARHIVEI
+Cod consolidat, sabloane, teste, utilitare si instructiuni.
+Nu include baze de date, arhive de backup ale utilizatorului, configuratia
+locala cu parola, mediul Python sau documentele externe ale lucrarilor.
+Arhiva reprezinta un checkpoint al codului. Backupul real al bazei ramane
+pe calculatorul utilizatorului in folderul backups.
+
+PASII RAMASI INAINTE DE LANSARE
+- Compararea sursei cu versiunea web curenta (arhiva recuperata difera de live).
+- Verificarea completa a drepturilor pe roluri si a modulelor ramase.
+- Decizia privind gazduirea si conectarea la PostgreSQL pe web.
+- Lansare numai dupa aprobarea utilizatorului; aplicatia web nu a fost modificata.
+- Evidenta reala porneste goala. Lucrarile vechi raman pe fluxul existent.
+- Documentele raman momentan in Google Drive.

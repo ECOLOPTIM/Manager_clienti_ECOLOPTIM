@@ -290,8 +290,6 @@ def show(user):
                 and str(row.get("domiciliu_numar", "")) == str(row.get("consum_numar", ""))
                 and str(row.get("domiciliu_bloc", "")) == str(row.get("consum_bloc", ""))
                 and str(row.get("domiciliu_apartament", "")) == str(row.get("consum_apartament", ""))
-                and str(row.get("domiciliu_scara", "")) == str(row.get("domiciliu_scara", ""))
-                and str(row.get("domiciliu_etaj", "")) == str(row.get("domiciliu_etaj", ""))
             )
             aceeasi_adresa = st.checkbox(
                 "Adresa de loc consum este identică cu domiciliu",
@@ -476,18 +474,18 @@ def show(user):
     df = df.drop(columns=["__DATA"], errors="ignore")
 
     # ---- CALCULE (contract/facturat/sold) + sortare ----
-    lucrari = db.lista_lucrari()
-    valori_contract = (
-        lucrari.groupby("client_id")["valoare_contractata"].sum().to_dict()
-        if (lucrari is not None and not lucrari.empty)
-        else {}
-    )
-
-    solduri = db.solduri_pe_clienti() or {}
-    facturat = db.facturat_pe_clienti() or {}
+    agg_df = db.agregate_financiare_clienti()
+    if agg_df is None or agg_df.empty:
+        contract_map = {}
+        facturat_map = {}
+        solduri_map = {}
+    else:
+        contract_map = dict(zip(agg_df["client_id"].astype(int), agg_df["valoare_contract"].astype(float)))
+        facturat_map = dict(zip(agg_df["client_id"].astype(int), agg_df["facturat"].astype(float)))
+        solduri_map = dict(zip(agg_df["client_id"].astype(int), agg_df["sold"].astype(float)))
 
     df = df.copy()
-    df["__SOLD"] = df["id"].apply(lambda cid: float(solduri.get(int(cid), 0.0) or 0.0))
+    df["__SOLD"] = df["id"].apply(lambda cid: float(solduri_map.get(int(cid), 0.0) or 0.0))
 
     st.markdown("<div class='eco-filters'>", unsafe_allow_html=True)
     fin_cols = st.columns([1.4, 1.3, 1.5, 2.0, 1.1])
@@ -547,9 +545,9 @@ def show(user):
         for _, row in df_page.iterrows():
             client_id = int(row["id"])
             data_ro = _fmt_date_ro(row.get("data_adaugarii", ""))
-            val_contract = _num(valori_contract.get(client_id, 0.0))
-            total_facturat = _num(facturat.get(client_id, 0.0))
-            sold = _num(solduri.get(client_id, 0.0))
+            val_contract = _num(contract_map.get(client_id, 0.0))
+            total_facturat = _num(facturat_map.get(client_id, 0.0))
+            sold = _num(solduri_map.get(client_id, 0.0))
 
             with st.container(border=True):
                 st.markdown(f"**{str(row.get('nume','')).upper()}**")
@@ -654,9 +652,9 @@ def show(user):
         for _, row in df_page.iterrows():
             client_id = int(row["id"])
             data_ro = _fmt_date_ro(row.get("data_adaugarii", ""))
-            val_contract = _num(valori_contract.get(client_id, 0.0))
-            total_facturat = _num(facturat.get(client_id, 0.0))
-            sold = _num(solduri.get(client_id, 0.0))
+            val_contract = _num(contract_map.get(client_id, 0.0))
+            total_facturat = _num(facturat_map.get(client_id, 0.0))
+            sold = _num(solduri_map.get(client_id, 0.0))
 
             fact_html = f"{total_facturat:,.2f}"
             if total_facturat > 0:
@@ -703,7 +701,6 @@ def show(user):
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-
     # ---- PAGINARE (centrată) ----
     st.markdown("---")
     outer = st.columns([1, 3, 1])
@@ -747,9 +744,9 @@ def show(user):
     st.subheader("📤 Export")
 
     export_df = df.copy().drop(columns=["__SOLD"], errors="ignore")
-    export_df["VALOARE_CONTRACT"] = export_df["id"].apply(lambda cid: float(valori_contract.get(int(cid), 0.0) or 0.0))
-    export_df["FACTURAT"] = export_df["id"].apply(lambda cid: float(facturat.get(int(cid), 0.0) or 0.0))
-    export_df["SOLD"] = export_df["id"].apply(lambda cid: float(solduri.get(int(cid), 0.0) or 0.0))
+    export_df["VALOARE_CONTRACT"] = export_df["id"].apply(lambda cid: float(contract_map.get(int(cid), 0.0) or 0.0))
+    export_df["FACTURAT"] = export_df["id"].apply(lambda cid: float(facturat_map.get(int(cid), 0.0) or 0.0))
+    export_df["SOLD"] = export_df["id"].apply(lambda cid: float(solduri_map.get(int(cid), 0.0) or 0.0))
 
     cols_export = [
         "id",

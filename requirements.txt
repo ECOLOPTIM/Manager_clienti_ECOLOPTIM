@@ -3,3 +3,4 @@ pandas
 openpyxl
 python-docx
 docxtpl
+psycopg[binary]>=3.2,<4
