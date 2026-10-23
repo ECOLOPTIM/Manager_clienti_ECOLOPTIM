@@ -17,9 +17,10 @@ from tests import test_core_workflow as core
 from tests import test_work_conflict_ui as ui
 from tests.test_permissions import PermissionCases
 from db import permissions
+from tests.test_iugn import IUGNChecks
 
 
-class PostgresWorkflow(unittest.TestCase):
+class PostgresWorkflow(IUGNChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         config = load_config()
@@ -48,8 +49,9 @@ class PostgresWorkflow(unittest.TestCase):
         cls.cleanup_schema()
 
     def setUp(self):
+        permissions.clear_actor()
         with db._connect() as conn:
-            conn.execute('TRUNCATE clienti, lucrari, sarcini, inregistrari, atasamente, '
+            conn.execute('TRUNCATE iugn_evenimente, iugn_flux, clienti, lucrari, sarcini, inregistrari, atasamente, '
                          'facturi, plati, documente_seq, contracte_seq, registru_seq_client '
                          'RESTART IDENTITY CASCADE')
         db.adauga_client({'nume': 'Test A', 'cod_intern': 'TEST-A'})
@@ -66,6 +68,20 @@ class PostgresWorkflow(unittest.TestCase):
         db.init_db()
         self.assertEqual(db.get_lucrare(int(row['id']))['descriere'], 'Original')
         self.assertEqual(db.get_utilizator('admin')['parola'], admin['parola'])
+
+    def test_schema_upgrade_from_validated_v1_preserves_legacy_data(self):
+        row = self.work_snapshot()
+        with db._connect() as conn:
+            conn.execute('DROP TABLE iugn_evenimente')
+            conn.execute('DROP TABLE iugn_flux')
+            conn.execute('ALTER TABLE sarcini DROP COLUMN cod_flux')
+            conn.execute('UPDATE ecoloptim_schema_version SET version=1')
+        db.init_db()
+        db.init_db()
+        self.assertEqual(db.get_lucrare(int(row['id']))['descriere'], 'Original')
+        self.assertEqual(len(db.lista_sarcini_lucrare(int(row['id']))), 5)
+        with db._connect() as conn:
+            self.assertEqual(conn.execute('SELECT version FROM ecoloptim_schema_version').fetchone()[0], 2)
 
     def test_foreign_keys_reject_orphan_and_wrong_owner(self):
         fid = self.factura()
