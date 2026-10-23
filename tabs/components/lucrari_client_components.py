@@ -679,6 +679,8 @@ def render_add_lucrare_form(user: str, client_id: int, client_row: pd.Series):
         return
 
     st.subheader("➕ Adăugare lucrare")
+    st.caption('Instalatia de utilizare noua porneste in starea OFERTAT. '
+               'Contractul, persoanele desemnate si programarile se confirma ulterior din Flux birou.')
     with st.form(f"{PREFIX}form_add_{client_id}", clear_on_submit=False):
         valori = {}
         r1 = st.columns([3, 2, 2])

@@ -90,3 +90,8 @@ temporara generata de teste, intr-o baza locala dedicata.
 Workflow-ul GitHub Actions porneste un PostgreSQL 16 temporar; nu foloseste serverul
 Hetzner sau date din productie. Validarea privata manuala si aprobarea publicarii
 raman obligatorii inaintea unei lansari.
+
+Rezultate confirmate la 23.10.2026: **96 teste SQLite/interfata/helperi si 54 teste
+PostgreSQL 16, toate OK**. Proba PostgreSQL include migrarea schemei populate v1,
+concurenta si rollback. Rulare CI:
+https://github.com/ECOLOPTIM/Manager_clienti_ECOLOPTIM/actions/runs/40001613434
