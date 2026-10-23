@@ -24,6 +24,12 @@ def clear_actor():
     _actor.set(None)
 
 
+def actor_username():
+    """Identity bound by authentication; never accept an actor from a form."""
+    actor = _actor.get()
+    return actor[0] if actor is not None else None
+
+
 def require(permission, target_username=None):
     actor = _actor.get()
     if actor is None:

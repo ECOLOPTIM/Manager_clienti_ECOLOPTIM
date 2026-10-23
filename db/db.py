@@ -75,8 +75,11 @@ def _init_postgres():
                             ("admin", hash_password(DEFAULT_ADMIN_PASSWORD), str(datetime.datetime.now())))
             else:
                 cur.execute("SELECT version FROM ecoloptim_schema_version")
-                if cur.fetchall() != [(1,)]:
+                if cur.fetchall() not in ([(1,)], [(2,)]):
                     raise ValueError("Versiune de schema PostgreSQL incompatibila.")
+            from db.iugn import migrate
+            migrate(conn)
+            cur.execute('UPDATE ecoloptim_schema_version SET version=2 WHERE version=1')
 
 
 def _ensure_parent_dir(file_path: str):
@@ -230,6 +233,9 @@ def _migrate_schema(conn: sqlite3.Connection):
     _execute(cur, "UPDATE utilizatori SET activ=1 WHERE activ IS NULL")
     _execute(cur, "UPDATE utilizatori SET must_change_password=0 WHERE must_change_password IS NULL")
     _execute(cur, "UPDATE utilizatori SET rol='admin' WHERE username='admin'")
+
+    from db.iugn import migrate
+    migrate(conn)
 
     conn.commit()
 
@@ -741,6 +747,12 @@ def flux_sarcini_pentru_tip_lucrare(tip_lucrare: str) -> list[str]:
 
 
 def _creeaza_flux_birou_pentru_lucrare(conn: sqlite3.Connection, client_id: int, lucrare_id: int, tip_lucrare: str, created_by: str):
+    from db import iugn, iugn_rules
+    from config.workflow_catalog import template_for
+    template = template_for(tip_lucrare)
+    if template and template['template'] == 'iugn01':
+        iugn._initialize(conn, lucrare_id, client_id)
+        return
     c = conn.cursor()
     steps = flux_sarcini_pentru_tip_lucrare(tip_lucrare)
     now = str(datetime.datetime.now())
@@ -752,6 +764,11 @@ def _creeaza_flux_birou_pentru_lucrare(conn: sqlite3.Connection, client_id: int,
 
 
 def adauga_lucrare(valori: dict):
+    from db.iugn_rules import WORK_TYPE
+    if valori.get('tip_lucrare') == WORK_TYPE:
+        # Operational facts start unconfirmed; importing a form is not confirmation.
+        valori = dict(valori, status='OFERTAT', responsabil='', data_contract='',
+                      data_programare='', echipa='', data_programare_pif='', echipa_pif='')
     columns = [
         "client_id",
         "tip_lucrare",
@@ -951,6 +968,13 @@ def modifica_lucrare(lucrare_id: int, valori: dict, *, expected_revision: int):
     with closing(_connect()) as conn, conn:
         _require_client(conn, int(valori["client_id"]))
         c = conn.cursor()
+        _execute(c, 'SELECT 1 FROM iugn_flux WHERE lucrare_id=?', (int(lucrare_id),))
+        if c.fetchone():
+            old = _read_frame('SELECT * FROM lucrari WHERE id=?', conn, [int(lucrare_id)]).iloc[0]
+            controlled = ('client_id', 'tip_lucrare', 'responsabil', 'status', 'data_contract',
+                          'data_programare', 'echipa', 'data_programare_pif', 'echipa_pif')
+            if any(str(valori.get(k) or '') != str(old[k] or '') for k in controlled):
+                raise ValueError('Pentru aceasta lucrare, modifica rolurile, etapele si programarile din fluxul IUGN.')
         # One conditional write makes the check atomic even across processes.
         _execute(c,
             f"UPDATE lucrari SET {set_sql}, revision=revision+1 WHERE id=? AND revision=?",
@@ -1087,6 +1111,10 @@ def update_sarcina(
 
     with closing(_connect()) as conn, conn:
         c = conn.cursor()
+        _execute(c, 'SELECT cod_flux FROM sarcini WHERE id=?', (int(sarcina_id),))
+        task = c.fetchone()
+        if task and task[0]:
+            raise ValueError('Sarcina IUGN se actualizeaza prin evenimentul corespunzator din fluxul lucrarii.')
         _execute(c, f"UPDATE sarcini SET {', '.join(fields)} WHERE id=?", params)
         conn.commit()
 

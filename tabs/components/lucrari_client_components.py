@@ -202,6 +202,7 @@ def render_documente_panel(
         st.error("Lucrarea nu mai există.")
         return
 
+
     st.markdown("---")
     st.subheader(f"📄 Documente pentru lucrare ID {lucrare_id}")
 
@@ -396,6 +397,15 @@ def render_flux_birou_panel(user: str, client_id: int):
     lucrare = db.get_lucrare(lucrare_id)
     if not lucrare:
         st.error("Lucrarea nu mai există.")
+        return
+
+    from db.iugn_rules import WORK_TYPE
+    if lucrare.get('tip_lucrare') == WORK_TYPE:
+        from tabs.components.iugn_panel import render
+        render(lucrare_id, client_id)
+        if st.button('Inchide fluxul', key=f'iugn_close_{client_id}_{lucrare_id}'):
+            st.session_state.pop(flow_key, None)
+            st.rerun()
         return
 
     st.markdown("---")
@@ -669,6 +679,8 @@ def render_add_lucrare_form(user: str, client_id: int, client_row: pd.Series):
         return
 
     st.subheader("➕ Adăugare lucrare")
+    st.caption('Instalatia de utilizare noua porneste in starea OFERTAT. '
+               'Contractul, persoanele desemnate si programarile se confirma ulterior din Flux birou.')
     with st.form(f"{PREFIX}form_add_{client_id}", clear_on_submit=False):
         valori = {}
         r1 = st.columns([3, 2, 2])
@@ -831,6 +843,12 @@ def render_edit_lucrare_form(client_id: int, df: pd.DataFrame):
             st.rerun()
 
     st.subheader(f"✏️ Editare lucrare — {safe_str(row.get('tip_lucrare'))}")
+    from db.iugn_rules import WORK_TYPE
+    from db import iugn
+    if row.get('tip_lucrare') == WORK_TYPE and iugn.get(lucrare_id) is not None:
+        from tabs.components.iugn_panel import render_work_details
+        render_work_details(row, client_id, edit_key, snapshot_key, conflict_key)
+        return
     with st.form(f"{PREFIX}form_edit_{lucrare_id}_{client_id}", clear_on_submit=False):
         valori = {}
 
