@@ -80,6 +80,22 @@ class IUGNUI(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(set(iugn.get(1)['state']['roles'].values()), {'admin'})
 
+    def test_contract_emission_is_automatic_and_unlinked_confirmation_can_be_corrected(self):
+        for key in ('oferta_acceptata','documente_complete'):
+            iugn.record_event(1,key,str(__import__('datetime').date.today()),expected_revision=iugn.get(1)['revision'])
+        app=self.open()
+        self.assertFalse(any('contract_emis' in field.options for field in app.selectbox if field.label=='Eveniment'))
+        permissions.clear_actor()
+        iugn.record_event(1,'contract_emis',str(__import__('datetime').date.today()),expected_revision=iugn.get(1)['revision'])
+        app=self.open()
+        self.assertTrue(any('confirmat manual' in item.value for item in app.warning))
+        next(x for x in app.text_input if x.label=='Motivul corectiei').set_value('Confirmare accidentala in test')
+        next(x for x in app.button if x.label=='Anuleaza confirmarea manuala Contract emis').click().run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.error)
+        self.assertNotIn('contract_emis',iugn.get(1)['state']['facts'])
+        self.assertIn('corectie_contract_emis',set(iugn.history(1)['event_key']))
+
     def test_details_form_can_edit_text_without_rewriting_roles_or_dates(self):
         code = '''
 import streamlit as st

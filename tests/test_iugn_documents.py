@@ -11,6 +11,67 @@ from tests.iugn_template_fixture import make_template
 
 
 class ContractIssueCases:
+    def bind_contract_admin(self):
+        permissions.clear_actor()
+        db.seteaza_must_change_password('admin',0)
+        permissions.bind_actor('admin',permissions.password_marker(db.get_utilizator('admin')))
+        self.addCleanup(permissions.clear_actor)
+
+    def test_browser_cannot_confirm_contract_without_document(self):
+        lid,bundle,terms=self.setup_contract()
+        self.bind_contract_admin()
+        before=iugn.get(lid)
+        with self.assertRaisesRegex(ValueError,'Documente'):
+            iugn.record_event(lid,'contract_emis',date.today().isoformat(),expected_revision=before['revision'])
+        self.assertEqual(iugn.get(lid),before)
+        self.assertIsNone(docs.open_form(lid)['issued'])
+
+    def test_browser_issue_confirms_contract_with_saved_document(self):
+        lid,bundle,terms=self.setup_contract()
+        self.bind_contract_admin()
+        result=docs.issue(lid,bundle,terms)
+        self.assertIn('contract_emis',iugn.get(lid)['state']['facts'])
+        self.assertEqual(docs.open_form(lid)['issued']['number'],result['number'])
+
+    def test_unlinked_confirmation_is_corrected_with_audit(self):
+        lid,bundle,terms=self.setup_contract()
+        iugn.record_event(lid,'contract_emis',date.today().isoformat(),expected_revision=iugn.get(lid)['revision'])
+        revision=iugn.get(lid)['revision']
+        self.bind_contract_admin()
+        with self.assertRaisesRegex(ValueError,'Motivul'):
+            iugn.correct_unlinked_contract(lid,expected_revision=revision,reason='')
+        iugn.correct_unlinked_contract(lid,expected_revision=revision,reason='Confirmare facuta din greseala')
+        state=iugn.get(lid)
+        self.assertNotIn('contract_emis',state['state']['facts'])
+        self.assertIn('documente_complete',state['state']['facts'])
+        self.assertEqual(db.get_lucrare(lid)['status'],'OFERTAT')
+        self.assertEqual(db.get_lucrare(lid)['valoare_contractata'],bundle['work']['valoare_contractata'])
+        self.assertIn('contract_emis',set(iugn.history(lid)['event_key']))
+        self.assertIn('corectie_contract_emis',set(iugn.history(lid)['event_key']))
+        with self.assertRaises(ValueError):
+            iugn.correct_unlinked_contract(lid,expected_revision=revision,reason='Repetare')
+        self.assertTrue(db.lista_atasamente(1,lucrare_id=lid).empty)
+
+    def test_correction_never_cancels_registered_contract(self):
+        lid,bundle,terms=self.setup_contract()
+        self.bind_contract_admin()
+        result=docs.issue(lid,bundle,terms)
+        before=iugn.get(lid)
+        with self.assertRaisesRegex(ValueError,'Exista un contract emis'):
+            iugn.correct_unlinked_contract(lid,expected_revision=before['revision'],reason='Nu se poate anula documentul')
+        self.assertEqual(iugn.get(lid),before)
+        self.assertEqual(docs.open_form(lid)['issued']['number'],result['number'])
+
+    def test_correction_rejects_downstream_confirmations(self):
+        lid,bundle,terms=self.setup_contract()
+        for key in ('contract_emis','contract_semnat'):
+            iugn.record_event(lid,key,date.today().isoformat(),expected_revision=iugn.get(lid)['revision'])
+        before=iugn.get(lid)
+        self.bind_contract_admin()
+        with self.assertRaisesRegex(ValueError,'Exista etape'):
+            iugn.correct_unlinked_contract(lid,expected_revision=before['revision'],reason='Corectie')
+        self.assertEqual(iugn.get(lid),before)
+
     def setup_contract(self):
         permissions.clear_actor()
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)

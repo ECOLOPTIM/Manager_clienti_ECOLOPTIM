@@ -216,6 +216,9 @@ def record_event_in_transaction(conn, lid, key, occurred_on, *, expected_revisio
         raise ValueError('Eveniment necunoscut.')
     if not can_record(state, key):
         raise PermissionError('Evenimentul necesita persoana desemnata pentru acest rol.')
+    if key == 'contract_emis' and permissions.actor_username() is not None:
+        if not contract_document_registered(conn, lid):
+            raise ValueError('Contract emis se confirma automat din Documente, dupa emiterea si salvarea documentului.')
     new_state = rules.record(state, key, occurred_on, note)
     detail = {'note': str(note).strip()}
     work_fields = {}
@@ -274,3 +277,50 @@ def assignable_users():
         cur = conn.cursor()
         cur.execute("SELECT username FROM utilizatori WHERE activ=1 AND rol IN ('admin','birou') ORDER BY username")
         return [row[0] for row in cur.fetchall()]
+
+
+def contract_document_registered(conn, lid):
+    """Check issuance evidence inside the caller's transaction."""
+    from db import db
+    cur = conn.cursor()
+    db._execute(cur, 'SELECT number FROM iugn_contract_issues WHERE lucrare_id=?', (int(lid),))
+    return cur.fetchone() is not None
+
+
+def has_contract_document(lid):
+    from db import db
+    with closing(db._connect()) as conn:
+        return contract_document_registered(conn, lid)
+
+
+def correct_unlinked_contract(lid, *, expected_revision, reason):
+    """Undo only an isolated, unlinked manual confirmation; preserve the audit."""
+    from db import db
+    require_manager()
+    if not str(reason).strip():
+        raise ValueError('Motivul corectiei este obligatoriu.')
+    with closing(db._connect()) as conn, conn:
+        if not db.DATABASE_URL:
+            conn.execute('BEGIN IMMEDIATE')
+        cur = conn.cursor()
+        db._execute(cur, 'SELECT id FROM lucrari WHERE id=?' +
+                    (' FOR UPDATE' if db.DATABASE_URL else ''), (int(lid),))
+        _work(conn, lid)
+        state = _checked_load(conn, lid, expected_revision)
+        if contract_document_registered(conn, lid):
+            raise ValueError('Exista un contract emis in dosar. Aceasta corectie nu il poate anula.')
+        if 'contract_emis' not in state['facts']:
+            raise ValueError('Nu exista o confirmare manuala Contract emis de corectat.')
+        later = set(state['facts']) - {'oferta_acceptata', 'documente_complete', 'contract_emis'}
+        if later or state['exceptions'] or any(state['roles'].values()):
+            raise ValueError('Exista etape sau persoane desemnate dupa confirmare. Corectia necesita verificarea dosarului.')
+        db._execute(cur, 'SELECT status,data_contract FROM lucrari WHERE id=?', (int(lid),))
+        previous_work = cur.fetchone()
+        previous = state['facts'].pop('contract_emis')
+        detail = {'reason': str(reason).strip(), 'previous_confirmation': previous,
+                  'previous_work_status': previous_work[0], 'previous_contract_date': previous_work[1]}
+        _save(conn, lid, expected_revision, state, 'corectie_contract_emis',
+              date.today().isoformat(), detail)
+        db._execute(cur, "UPDATE lucrari SET status='OFERTAT',data_contract='',revision=revision+1 WHERE id=?",
+                    (int(lid),))
+    return expected_revision + 1
