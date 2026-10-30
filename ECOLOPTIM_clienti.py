@@ -18,6 +18,7 @@ from tabs import (
 import db.db as db
 from db import permissions
 from tabs import tab_consultare
+from tabs import tab_date_generale
 
 permissions.clear_actor()
 
@@ -180,6 +181,8 @@ if must_change_password:
     st.info("Schimba parola din bara laterala inainte sa continui.")
     st.stop()
 
+tab_date_generale.render_authorization_alerts()
+
 tab_defs = [
     ("🏠 Overview", lambda: tab_overview.show(user)),
     ("👥 Clienți", lambda: tab_clienti.show(user)),
@@ -193,6 +196,7 @@ tab_defs = [
 ]
 
 if role == "admin":
+    tab_defs.append(("⚙️ Date generale", lambda: tab_date_generale.show(user)))
     tab_defs.append(("👤 Utilizatori", lambda: tab_utilizatori.show(user)))
 
 if role == "vizualizare":

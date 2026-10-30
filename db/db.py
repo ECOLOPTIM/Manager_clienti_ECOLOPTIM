@@ -79,6 +79,8 @@ def _init_postgres():
                     raise ValueError("Versiune de schema PostgreSQL incompatibila.")
             from db.iugn import migrate
             migrate(conn)
+            from db.company import migrate as migrate_company
+            migrate_company(conn)
             cur.execute('UPDATE ecoloptim_schema_version SET version=2 WHERE version=1')
 
 
@@ -236,6 +238,8 @@ def _migrate_schema(conn: sqlite3.Connection):
 
     from db.iugn import migrate
     migrate(conn)
+    from db.company import migrate as migrate_company
+    migrate_company(conn)
 
     conn.commit()
 

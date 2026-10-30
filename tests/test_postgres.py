@@ -18,9 +18,10 @@ from tests import test_work_conflict_ui as ui
 from tests.test_permissions import PermissionCases
 from db import permissions
 from tests.test_iugn import IUGNChecks
+from tests.test_company import CompanyCases
 
 
-class PostgresWorkflow(IUGNChecks, unittest.TestCase):
+class PostgresWorkflow(CompanyCases, IUGNChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         config = load_config()
