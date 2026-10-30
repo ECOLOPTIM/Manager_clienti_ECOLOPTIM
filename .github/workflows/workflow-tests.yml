@@ -15,7 +15,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python -m tests.test_core_workflow
-      - run: python -m unittest tests.test_iugn tests.test_iugn_ui tests.test_permissions tests.test_access_ui tests.test_work_conflict_ui tests.test_lucrari_report_ui tests.test_backup_restore_helpers
+      - run: python -m unittest tests.test_iugn tests.test_iugn_ui tests.test_permissions tests.test_access_ui tests.test_work_conflict_ui tests.test_lucrari_report_ui tests.test_backup_restore_helpers tests.test_company tests.test_company_ui
   postgres:
     runs-on: ubuntu-latest
     services:
