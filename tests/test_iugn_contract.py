@@ -59,6 +59,26 @@ class ContractIUGNTests(unittest.TestCase):
                 self.assertNotIn('Banca beneficiar:', text)
                 self.assertNotIn('{{', text)
 
+    def test_cnp_is_not_required_or_exported_even_from_legacy_template(self):
+        args=list(fixture())
+        args[0]['cnp']='0000000000000'
+        args[3]['beneficiar_cnp']='0000000000000'
+        data=generate_contract(*args)
+        text='\n'.join(p.text for p in Document(BytesIO(data)).paragraphs)
+        self.assertNotIn('0000000000000',text)
+        self.assertNotIn('CNP',text)
+        self.assertNotIn('beneficiar_cnp',prepare_context(*args))
+
+    def test_common_texts_have_defaults(self):
+        args=list(fixture())
+        for field in ('descriere_lucrare','defalcare_avize','documente_detectoare_beneficiar'):
+            args[3][field]=''
+        args[1]['tip_lucrare']='Instalatie de utilizare noua'
+        context=prepare_context(*args)
+        self.assertEqual(context['descriere_lucrare'],args[1]['tip_lucrare'])
+        self.assertEqual(context['defalcare_avize'],'Nu sunt incluse avize in pret.')
+        self.assertEqual(context['documente_detectoare_beneficiar'],'Nu este cazul.')
+
     def test_missing_licence_or_gdpr_blocks_generation(self):
         for key in ('autorizatie_executie_numar', 'gdpr_pastrare_acte', 'gdpr_transferuri'):
             args=list(fixture());args[2][key]=''

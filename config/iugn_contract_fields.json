@@ -75,7 +75,9 @@
       "source": "client.ci_serie"
     },
     "beneficiar_cnp": {
-      "source": "client.cnp"
+      "source": "excluded",
+      "enabled": false,
+      "note": "Camp istoric eliminat din formular si documentele generate."
     },
     "beneficiar_cod_postal": {
       "source": "client.domiciliu_cod_postal"

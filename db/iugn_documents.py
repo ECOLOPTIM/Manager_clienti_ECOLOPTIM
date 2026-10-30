@@ -39,6 +39,7 @@ def _records(conn,lid,lock=False):
         raise ValueError('Contractul IUGN este disponibil pentru instalatia de utilizare noua.')
     client=_row(conn,'SELECT * FROM clienti WHERE id=?'+(' FOR SHARE' if lock and db.DATABASE_URL else ''),(work['client_id'],))
     if not client: raise ValueError('Clientul nu mai exista.')
+    client.pop('cnp',None)
     return client,work
 
 
@@ -50,7 +51,7 @@ def open_form(lid):
         issued=_row(conn,'SELECT * FROM iugn_contract_issues WHERE lucrare_id=?',(lid,))
     return {'client':client,'work':work,'company':company.get(),
             'draft_revision':draft['revision'] if draft else 0,
-            'terms':json.loads(draft['payload']) if draft else {},'issued':issued,
+            'terms':{k:v for k,v in json.loads(draft['payload']).items() if k!='beneficiar_cnp'} if draft else {},'issued':issued,
             'template_hash':hashlib.sha256(contract.TEMPLATE.read_bytes()).hexdigest()}
 
 
@@ -60,8 +61,8 @@ def save_draft(lid,terms,*,expected_revision):
         raise ValueError('Revizie de ciorna invalida.')
     # Persist only contract fields; company data is controlled through Date generale.
     from config.company_fields import COMPANY_FIELDS
-    from docxtpl import DocxTemplate
-    names=DocxTemplate(contract.TEMPLATE).get_undeclared_template_variables()
+    terms={name:value for name,value in terms.items() if name!='beneficiar_cnp'}
+    names=contract.template_variables()
     if set(terms)-names or set(terms)&COMPANY_FIELDS.keys() or 'nr_contract' in terms:
         raise ValueError('Ciorna contine campuri nepermise.')
     actor=permissions.actor_username() or 'mentenanta locala'
@@ -80,8 +81,14 @@ def save_draft(lid,terms,*,expected_revision):
 
 def preview(bundle,terms):
     permissions.require('write')
-    return contract.generate_contract(bundle['client'],bundle['work'],bundle['company']['values'],
-                                      dict(terms,nr_contract='PREVIZUALIZARE'))
+    firm=dict(bundle['company']['values'])
+    for name in ('gdpr_pastrare_acte','gdpr_pastrare_contabil','gdpr_pastrare_contract','gdpr_pastrare_tehnic','gdpr_transferuri'):
+        if not str(firm.get(name) or '').strip():
+            firm[name]='NECONFIGURAT - numai pentru previzualizare'
+    draft=dict(terms,nr_contract='PREVIZUALIZARE')
+    if not str(draft.get('nr_deviz') or '').strip():draft['nr_deviz']='NECOMPLETAT'
+    if not draft.get('data_deviz'):draft['data_deviz']=draft.get('data_contract') or date.today().isoformat()
+    return contract.generate_contract(bundle['client'],bundle['work'],firm,draft)
 
 
 def issue(lid,bundle,terms):

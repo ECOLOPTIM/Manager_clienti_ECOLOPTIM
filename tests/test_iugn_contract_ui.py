@@ -24,6 +24,7 @@ class ContractFormUI(unittest.TestCase):
         app=AppTest.from_string(APP,default_timeout=15)
         app.session_state['test_lid']=lid
         app.run();self.assertFalse(app.exception)
+        self.assertFalse(any('CNP' in x.label for x in app.text_input))
         next(b for b in app.button if b.label=='Verifica si previzualizeaza').click().run()
         self.assertFalse(app.exception)
         self.assertFalse(app.error)

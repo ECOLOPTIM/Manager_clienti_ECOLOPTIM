@@ -11,6 +11,39 @@ from tests.iugn_template_fixture import make_template
 
 
 class ContractIssueCases:
+    def test_preview_marks_missing_settings_but_final_issue_still_requires_them(self):
+        lid,bundle,terms=self.setup_contract()
+        settings=company.get()
+        values=dict(settings['values'])
+        for name in values:
+            if name.startswith('gdpr_'):values[name]=''
+        company.save(values,expected_revision=settings['revision'])
+        terms=dict(terms,nr_deviz='',data_deviz='',defalcare_avize='',descriere_lucrare='',documente_detectoare_beneficiar='')
+        bundle=docs.open_form(lid)
+        data=docs.preview(bundle,terms)
+        from docx import Document
+        from io import BytesIO
+        text='\n'.join(p.text for p in Document(BytesIO(data)).paragraphs)
+        self.assertIn('NECONFIGURAT - numai pentru previzualizare',text)
+        self.assertIn('PREVIZUALIZARE',text)
+        self.assertIn('NECOMPLETAT',text)
+        self.assertEqual(company.get()['values']['gdpr_pastrare_acte'],'')
+        self.assertEqual(terms['nr_deviz'],'')
+        self.assertIsNone(docs.open_form(lid)['issued'])
+        with self.assertRaises(ValueError):docs.issue(lid,bundle,terms)
+
+    def test_cnp_is_not_copied_from_client_or_legacy_draft_into_contract_snapshot(self):
+        lid,bundle,terms=self.setup_contract()
+        with closing(db._connect()) as conn,conn:
+            db._execute(conn.cursor(),'UPDATE clienti SET cnp=? WHERE id=1',('0000000000000',))
+        rev=docs.save_draft(lid,dict(terms,beneficiar_cnp='0000000000000'),expected_revision=bundle['draft_revision'])
+        bundle=docs.open_form(lid)
+        self.assertNotIn('cnp',bundle['client'])
+        self.assertNotIn('beneficiar_cnp',bundle['terms'])
+        docs.issue(lid,bundle,terms)
+        snapshot=docs.open_form(lid)['issued']['snapshot']
+        self.assertNotIn('0000000000000',snapshot)
+
     def bind_contract_admin(self):
         permissions.clear_actor()
         db.seteaza_must_change_password('admin',0)

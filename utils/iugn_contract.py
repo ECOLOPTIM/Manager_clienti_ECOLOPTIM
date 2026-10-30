@@ -9,6 +9,8 @@ from io import BytesIO
 from pathlib import Path
 import re
 from zipfile import ZipFile
+from copy import deepcopy
+from docx import Document
 
 from docxtpl import DocxTemplate
 from jinja2 import Environment, StrictUndefined
@@ -17,7 +19,7 @@ TEMPLATE = Path(__file__).resolve().parents[1] / 'templates' / 'contract_iugn.do
 ADDRESS_PARTS = ('judet', 'localitate', 'strada', 'numar', 'bloc', 'scara', 'etaj', 'apartament', 'cod_postal')
 CLIENT_FIELDS = {
     'beneficiar_nume': 'nume', 'beneficiar_firma': 'firma',
-    'beneficiar_cnp': 'cnp', 'beneficiar_ci_serie': 'ci_serie',
+    'beneficiar_ci_serie': 'ci_serie',
     'beneficiar_ci_nr': 'ci_numar', 'beneficiar_ci_emitent': 'ci_emitent',
     'beneficiar_ci_data': 'ci_data', 'client_telefon': 'telefon', 'client_email': 'email',
     **{f'beneficiar_{part}': f'domiciliu_{part}' for part in ADDRESS_PARTS},
@@ -30,6 +32,39 @@ MONEY_INPUTS = ('valoare_proiectare', 'valoare_verificare', 'valoare_avize',
 
 class ContractDataError(ValueError):
     """A reviewable generation error containing field names, never client data."""
+
+
+def contract_template():
+    """Support installed older templates without collecting or printing CNP."""
+    source=Document(TEMPLATE)
+    def paragraphs(container):
+        yield from container.paragraphs
+        for table in container.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    yield from paragraphs(cell)
+    containers=[source]
+    for section in source.sections:
+        containers.extend((section.header,section.footer))
+    for container in containers:
+        for paragraph in paragraphs(container):
+            if 'beneficiar_cnp' not in paragraph.text:
+                continue
+            text=re.sub(r',\s*CNP\s*\{\{\s*beneficiar_cnp\s*\}\}', '', paragraph.text,flags=re.I)
+            text=re.sub(r'\bCNP\s*:?\s*\{\{\s*beneficiar_cnp\s*\}\}', '', text,flags=re.I)
+            text=re.sub(r'\{\{\s*beneficiar_cnp\s*\}\}', '', text)
+            formatting=deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
+            paragraph.text=text
+            if formatting is not None and paragraph.runs:
+                paragraph.runs[0]._r.insert(0,formatting)
+    buffer=BytesIO()
+    source.save(buffer)
+    buffer.seek(0)
+    return DocxTemplate(buffer)
+
+
+def template_variables():
+    return contract_template().get_undeclared_template_variables()
 
 
 def _number(value, field):
@@ -71,7 +106,9 @@ def prepare_context(client, work, company, terms):
     """
     if not client.get('id') or str(work.get('client_id')) != str(client['id']):
         raise ContractDataError('Lucrarea nu apartine clientului selectat.')
-    names = DocxTemplate(TEMPLATE).get_undeclared_template_variables()
+    names = template_variables()
+    # Ignore a legacy draft's CNP without exporting or storing a new copy.
+    terms={name:value for name,value in terms.items() if name!='beneficiar_cnp'}
     ctx = {name: '' for name in names}
     ctx.update({name: client.get(source) or '' for name, source in CLIENT_FIELDS.items()})
     ctx.update({name: work.get(source) or '' for name, source in WORK_FIELDS.items()})
@@ -85,6 +122,12 @@ def prepare_context(client, work, company, terms):
         raise ContractDataError('Datele firmei si GDPR se furnizeaza prin configuratia firmei.')
     ctx.update(company)
     ctx.update(terms)
+    if not str(ctx.get('descriere_lucrare') or '').strip():
+        ctx['descriere_lucrare']=work.get('tip_lucrare') or 'Instalatie de utilizare a gazelor naturale'
+    if not str(ctx.get('defalcare_avize') or '').strip() and _number(ctx.get('valoare_avize') or 0,'valoare_avize')==0:
+        ctx['defalcare_avize']='Nu sunt incluse avize in pret.'
+    if not str(ctx.get('documente_detectoare_beneficiar') or '').strip():
+        ctx['documente_detectoare_beneficiar']='Nu este cazul.'
     if ctx['beneficiar_tip'] not in ('PF', 'PJ'):
         raise ContractDataError('Selecteaza explicit beneficiar_tip: PF sau PJ.')
     if not isinstance(ctx['corespondenta_diferita'], bool):
@@ -141,7 +184,7 @@ def prepare_context(client, work, company, terms):
 def generate_contract(client, work, company, terms):
     """Return validated DOCX bytes; caller remains responsible for issuing/saving it."""
     ctx = prepare_context(client, work, company, terms)
-    doc = DocxTemplate(TEMPLATE)
+    doc = contract_template()
     doc.render(ctx, jinja_env=Environment(undefined=StrictUndefined), autoescape=True)
     output = BytesIO()
     doc.save(output)

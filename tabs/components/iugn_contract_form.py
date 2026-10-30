@@ -10,7 +10,7 @@ LABELS={
  'beneficiar_nume':'Nume beneficiar / reprezentant','beneficiar_firma':'Denumire beneficiar persoana juridica',
  'beneficiar_cui':'CUI beneficiar','beneficiar_regcom':'Registrul Comertului beneficiar',
  'beneficiar_reprezentant_calitate':'Calitatea reprezentantului beneficiarului',
- 'beneficiar_cnp':'CNP beneficiar','beneficiar_ci_serie':'Serie CI','beneficiar_ci_nr':'Numar CI',
+ 'beneficiar_ci_serie':'Serie CI','beneficiar_ci_nr':'Numar CI',
  'beneficiar_ci_emitent':'CI eliberata de','beneficiar_ci_data':'Data eliberarii CI',
  'client_telefon':'Telefon beneficiar','client_email':'E-mail beneficiar',
  'beneficiar_banca':'Banca beneficiar optional','beneficiar_iban':'IBAN beneficiar optional',
@@ -29,6 +29,17 @@ def _date(value):
         try:return datetime.strptime(str(value),fmt).date()
         except ValueError:pass
     return None
+
+
+def _message(error):
+    text=str(error)
+    labels={**LABELS,**COMPANY_FIELDS}
+    for prefix,label in [('beneficiar_','Domiciliu / sediu'),('adresa_','Adresa lucrarii'),('corespondenta_','Corespondenta')]:
+        for part in contract.ADDRESS_PARTS:
+            labels[prefix+part]=label+' - '+part.replace('_',' ')
+    for name in sorted(labels,key=len,reverse=True):
+        text=text.replace(name,labels[name])
+    return text
 
 
 def render(lid):
@@ -62,13 +73,21 @@ def render(lid):
     defaults={n:bundle['client'].get(src) or '' for n,src in contract.CLIENT_FIELDS.items()}
     defaults.update({n:bundle['work'].get(src) or '' for n,src in contract.WORK_FIELDS.items()})
     defaults.update(bundle['terms'])
+    if not defaults.get('descriere_lucrare'):
+        defaults['descriere_lucrare']=bundle['work'].get('tip_lucrare') or 'Instalatie de utilizare a gazelor naturale'
+    if not defaults.get('documente_detectoare_beneficiar'):
+        defaults['documente_detectoare_beneficiar']='Nu este cazul.'
+    if not defaults.get('defalcare_avize') and not defaults.get('valoare_avize'):
+        defaults['defalcare_avize']='Nu sunt incluse avize in pret.'
+    st.caption('Pentru previzualizare, datele GDPR sau devizul inca lipsa sunt marcate in document. '
+               'Datele obligatorii se verifica integral inainte de emitere.')
     kind=st.selectbox('Tip beneficiar',['PF','PJ'],index=1 if defaults.get('beneficiar_tip')=='PJ' else 0,key=key+'_kind')
     correspondence=st.checkbox('Adresa de corespondenta diferita',value=bool(defaults.get('corespondenta_diferita')),key=key+'_correspondence')
     values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence}
     with st.form(key+f"_form_{bundle['draft_revision']}"):
         for group,names in [
             ('Beneficiar', ['beneficiar_nume']+(['beneficiar_firma','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate'] if kind=='PJ'
-                else ['beneficiar_cnp','beneficiar_ci_serie','beneficiar_ci_nr','beneficiar_ci_emitent','beneficiar_ci_data'])+
+                else ['beneficiar_ci_serie','beneficiar_ci_nr','beneficiar_ci_emitent','beneficiar_ci_data'])+
                 ['client_telefon','client_email','beneficiar_banca','beneficiar_iban']),
             ('Domiciliul sau sediul beneficiarului',['beneficiar_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa lucrarii',['adresa_'+p for p in contract.ADDRESS_PARTS]),
@@ -104,7 +123,7 @@ def render(lid):
                 data=docs.preview(bundle,values)
                 st.session_state[key+'_preview']={'terms':values,'data':data}
             else:st.success('Ciorna salvata. Datele clientului si ale lucrarii nu au fost modificate.')
-        except (ValueError,PermissionError,OSError) as exc:st.error(str(exc))
+        except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))
     approved=st.session_state.get(key+'_preview')
     if approved and (approved['terms']['beneficiar_tip']!=kind or
                      approved['terms']['corespondenta_diferita']!=correspondence):
@@ -116,7 +135,7 @@ def render(lid):
         if st.button('Emite si salveaza contractul in dosar',key=key+'_issue'):
             try:
                 docs.issue(lid,bundle,approved['terms'])
-            except (ValueError,PermissionError,OSError) as exc:st.error(str(exc))
+            except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))
             else:
                 st.session_state.pop(key,None);st.session_state.pop(key+'_preview',None)
                 st.session_state.pop(f'iugn_{bundle["client"]["id"]}_{lid}_snapshot',None)
