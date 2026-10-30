@@ -108,8 +108,26 @@ def render(lucrare_id, client_id):
                      'Data': state['facts'].get(key, {}).get('date', ''),
                      'Conditie': '' if done else problem})
     st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+    st.caption('Contract emis se confirma automat din Documente, dupa salvarea contractului. '
+               'Contract semnat este o etapa separata.')
+    if 'contract_emis' in state['facts'] and not iugn.has_contract_document(lucrare_id):
+        st.warning('Contract emis este confirmat manual, dar nu exista un contract emis de aplicatie in dosar.')
+        if iugn.is_manager():
+            with st.form(prefix+f'_contract_correction_{revision}'):
+                correction_reason = st.text_input('Motivul corectiei', key=prefix+f'_correction_reason_{revision}')
+                correction = st.form_submit_button('Anuleaza confirmarea manuala Contract emis')
+            if correction:
+                try:
+                    iugn.correct_unlinked_contract(lucrare_id, expected_revision=revision, reason=correction_reason)
+                except (ValueError, PermissionError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.pop(cache, None)
+                    st.session_state.pop(f'iugn_contract_bundle_{lucrare_id}', None)
+                    st.session_state.pop(f'iugn_contract_bundle_{lucrare_id}_preview', None)
+                    st.rerun()
     available = [key for key in rules.EVENT_LABELS
-                 if not rules.blocked_reason(state, key) and iugn.can_record(state, key)]
+                 if key != 'contract_emis' and not rules.blocked_reason(state, key) and iugn.can_record(state, key)]
     if available:
         st.markdown('**Inregistreaza un eveniment**')
         key = st.selectbox('Eveniment', available, format_func=rules.EVENT_LABELS.get,
@@ -136,13 +154,15 @@ def render(lucrare_id, client_id):
             else:
                 st.session_state.pop(cache, None)
                 st.rerun()
+    elif not rules.blocked_reason(state, 'contract_emis'):
+        st.info('Emite contractul din Documente pentru a continua fluxul.')
     else:
         st.info('Nu exista evenimente disponibile pentru contul tau in etapa curenta. '
                 'Verifica persoanele desemnate si conditiile din tabel.')
     with st.expander('Istoricul lucrarii'):
         events = iugn.history(lucrare_id)
         if not events.empty:
-            events['event_key'] = events['event_key'].map(lambda k: rules.EVENT_LABELS.get(k, k))
+            events['event_key'] = events['event_key'].map(lambda k: rules.EVENT_LABELS.get(k, 'Anulare confirmare manuala Contract emis' if k == 'corectie_contract_emis' else k))
             events['detail'] = events['detail'].map(lambda d: json.dumps(json.loads(d), ensure_ascii=False))
             st.dataframe(events.rename(columns={'event_key': 'Eveniment', 'occurred_on': 'Data eveniment',
                 'recorded_at': 'Inregistrat la', 'actor': 'Utilizator', 'detail': 'Detalii',

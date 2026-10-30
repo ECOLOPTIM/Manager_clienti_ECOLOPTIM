@@ -1,15 +1,18 @@
 """Create a NEW local test database with its own application role."""
 import getpass
+import argparse
 import secrets
 from urllib.parse import quote
 
 import psycopg
 from psycopg import sql
 from db import db
-from tools.local_pg_config import CONFIG, ROOT, DB_NAME, ROLE_NAME, write_config
+from tools.local_pg_config import CONFIG, ROOT, DB_NAME, write_config, validate_test_database
 
 
-def main():
+def main(database=DB_NAME):
+    database = validate_test_database(database)
+    role_name = database + '_app'
     if CONFIG.exists():
         raise ValueError('Configuratia exista deja. Foloseste tools.start_postgres_test.')
     port = int(input('Port PostgreSQL [5432]: ').strip() or '5432')
@@ -26,36 +29,39 @@ def main():
     role_created = database_created = False
     with psycopg.connect(host='127.0.0.1', port=port, dbname='postgres', user=user,
                          password=password, autocommit=True, connect_timeout=10) as conn:
-        if conn.execute('SELECT 1 FROM pg_database WHERE datname=%s', (DB_NAME,)).fetchone():
+        if conn.execute('SELECT 1 FROM pg_database WHERE datname=%s', (database,)).fetchone():
             raise ValueError('Baza de test exista deja. Nu am modificat-o.')
-        if conn.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (ROLE_NAME,)).fetchone():
+        if conn.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (role_name,)).fetchone():
             raise ValueError('Rolul de test exista deja. Nu am modificat nimic.')
         try:
             conn.execute(sql.SQL('CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}')
-                         .format(sql.Identifier(ROLE_NAME), sql.Literal(role_password)))
+                         .format(sql.Identifier(role_name), sql.Literal(role_password)))
             role_created = True
             conn.execute(sql.SQL('CREATE DATABASE {} OWNER {} TEMPLATE template0 ENCODING {}')
-                         .format(sql.Identifier(DB_NAME), sql.Identifier(ROLE_NAME), sql.Literal('UTF8')))
+                         .format(sql.Identifier(database), sql.Identifier(role_name), sql.Literal('UTF8')))
             database_created = True
-            conn.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM PUBLIC').format(sql.Identifier(DB_NAME)))
-            url = f'postgresql://{ROLE_NAME}:{quote(role_password, safe="")}@127.0.0.1:{port}/{DB_NAME}'
+            conn.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM PUBLIC').format(sql.Identifier(database)))
+            url = f'postgresql://{role_name}:{quote(role_password, safe="")}@127.0.0.1:{port}/{database}'
             db.DATABASE_URL = url
             db.DATABASE_SCHEMA = "public"
             db.DEFAULT_ADMIN_PASSWORD = admin_password
             db.init_db()
-            write_config({'DATABASE_URL': url, 'UPLOAD_DIR': str(ROOT / 'uploads_pg_test')})
+            write_config({'DATABASE_URL': url, 'UPLOAD_DIR': str(ROOT / 'uploads_pg_test'), 'TEST_DATABASE': database})
         except Exception:
             # Keep a successfully created database for diagnosis; never delete data here.
             if role_created and not database_created:
-                conn.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(ROLE_NAME)))
+                conn.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(role_name)))
             raise
     print('Baza noua de test este pregatita. Adminul aplicatiei foloseste parola aleasa de tine.')
     print('Pornire: .venv\\Scripts\\python.exe -m tools.start_postgres_test')
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Creeaza o baza PostgreSQL locala noua de test.')
+    parser.add_argument('--database', default=DB_NAME, help='Nume nou de forma ecoloptim_nume_test')
+    args = parser.parse_args()
     try:
-        main()
+        main(args.database)
     except (ValueError, psycopg.Error) as exc:
         # Do not render connection strings, generated role passwords, or raw server traces.
         print('Configurarea nu s-a terminat. ' + (str(exc) if isinstance(exc, ValueError)
