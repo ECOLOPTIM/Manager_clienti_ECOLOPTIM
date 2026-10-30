@@ -1,3 +1,4 @@
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 import tempfile
@@ -55,12 +56,12 @@ class ContractIssueCases:
 
     def test_file_failure_rolls_back_counter_and_flow(self):
         lid,bundle,terms=self.setup_contract()
-        with db._connect() as conn:
+        with closing(db._connect()) as conn:
             row=db._execute(conn.cursor(),'SELECT last_ctr FROM contracte_seq WHERE an=?',(date.today().year,)).fetchone()
         before=row[0] if row else 0
         with patch.object(ic,'generate_contract',side_effect=OSError('test write error')):
             with self.assertRaises(OSError):docs.issue(lid,bundle,terms)
-        with db._connect() as conn:
+        with closing(db._connect()) as conn:
             row=db._execute(conn.cursor(),'SELECT last_ctr FROM contracte_seq WHERE an=?',(date.today().year,)).fetchone()
         self.assertEqual(row[0] if row else 0,before)
         self.assertNotIn('contract_emis',iugn.get(lid)['state']['facts'])
