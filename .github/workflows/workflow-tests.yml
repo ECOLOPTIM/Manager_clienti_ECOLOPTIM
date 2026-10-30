@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements.txt
-      - run: python -W error::ResourceWarning -m unittest tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_contract_ui
+      - run: python -W error::ResourceWarning -m unittest tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_contract_ui tests.test_local_pg_config
   sqlite-and-ui:
     runs-on: ubuntu-latest
     steps:
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python -m tests.test_core_workflow
-      - run: python -m unittest tests.test_iugn tests.test_iugn_ui tests.test_permissions tests.test_access_ui tests.test_work_conflict_ui tests.test_lucrari_report_ui tests.test_backup_restore_helpers tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_contract_ui
+      - run: python -m unittest tests.test_iugn tests.test_iugn_ui tests.test_permissions tests.test_access_ui tests.test_work_conflict_ui tests.test_lucrari_report_ui tests.test_backup_restore_helpers tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_contract_ui tests.test_local_pg_config
   postgres:
     runs-on: ubuntu-latest
     services:
@@ -44,6 +44,23 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
+      - name: Validate isolated PostgreSQL setup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from unittest.mock import patch
+          from tools import local_pg_config as cfg, setup_postgres_test as setup
+          with TemporaryDirectory() as directory:
+              config_path = Path(directory) / 'isolated.json'
+              with patch.object(cfg, 'CONFIG', config_path), patch.object(setup, 'CONFIG', config_path):
+                  with patch('builtins.input', side_effect=['5432', 'ecoloptim_ci']):
+                      with patch('getpass.getpass', side_effect=['disposable-ci-only', 'Test-app-password-123', 'Test-app-password-123']):
+                          setup.main('ecoloptim_isolated_ci_test')
+                  loaded = cfg.load_config()
+                  assert loaded['TEST_DATABASE'] == 'ecoloptim_isolated_ci_test'
+                  assert loaded['DATABASE_URL'].endswith('/ecoloptim_isolated_ci_test')
+          PY
       - name: Configure disposable PostgreSQL only
         run: |
           python - <<'PY'
