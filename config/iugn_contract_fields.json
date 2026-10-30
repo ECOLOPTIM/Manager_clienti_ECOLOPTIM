@@ -1,0 +1,294 @@
+{
+  "template": "templates/contract_iugn.docx",
+  "version": "2026-10-30",
+  "fields": {
+    "adresa_apartament": {
+      "source": "work.adresa_apartament"
+    },
+    "adresa_bloc": {
+      "source": "work.adresa_bloc"
+    },
+    "adresa_cod_postal": {
+      "source": "work.adresa_cod_postal"
+    },
+    "adresa_etaj": {
+      "source": "work.adresa_etaj"
+    },
+    "adresa_judet": {
+      "source": "work.adresa_judet"
+    },
+    "adresa_localitate": {
+      "source": "work.adresa_localitate"
+    },
+    "adresa_numar": {
+      "source": "work.adresa_numar"
+    },
+    "adresa_scara": {
+      "source": "work.adresa_scara"
+    },
+    "adresa_strada": {
+      "source": "work.adresa_strada"
+    },
+    "autorizatie_executie_expirare": {
+      "source": "company_config"
+    },
+    "autorizatie_executie_numar": {
+      "source": "company_config"
+    },
+    "autorizatie_executie_tip": {
+      "source": "company_config"
+    },
+    "autorizatie_proiectare_expirare": {
+      "source": "company_config"
+    },
+    "autorizatie_proiectare_numar": {
+      "source": "company_config"
+    },
+    "autorizatie_proiectare_tip": {
+      "source": "company_config"
+    },
+    "avans_procent": {
+      "source": "contract_terms"
+    },
+    "avans_suma": {
+      "source": "derived"
+    },
+    "beneficiar_apartament": {
+      "source": "client.domiciliu_apartament"
+    },
+    "beneficiar_banca": {
+      "source": "contract_terms"
+    },
+    "beneficiar_bloc": {
+      "source": "client.domiciliu_bloc"
+    },
+    "beneficiar_ci_data": {
+      "source": "client.ci_data"
+    },
+    "beneficiar_ci_emitent": {
+      "source": "client.ci_emitent"
+    },
+    "beneficiar_ci_nr": {
+      "source": "client.ci_numar"
+    },
+    "beneficiar_ci_serie": {
+      "source": "client.ci_serie"
+    },
+    "beneficiar_cnp": {
+      "source": "client.cnp"
+    },
+    "beneficiar_cod_postal": {
+      "source": "client.domiciliu_cod_postal"
+    },
+    "beneficiar_cui": {
+      "source": "contract_terms"
+    },
+    "beneficiar_etaj": {
+      "source": "client.domiciliu_etaj"
+    },
+    "beneficiar_firma": {
+      "source": "client.firma"
+    },
+    "beneficiar_iban": {
+      "source": "contract_terms"
+    },
+    "beneficiar_judet": {
+      "source": "client.domiciliu_judet"
+    },
+    "beneficiar_localitate": {
+      "source": "client.domiciliu_localitate"
+    },
+    "beneficiar_numar": {
+      "source": "client.domiciliu_numar"
+    },
+    "beneficiar_nume": {
+      "source": "client.nume"
+    },
+    "beneficiar_regcom": {
+      "source": "contract_terms"
+    },
+    "beneficiar_reprezentant_calitate": {
+      "source": "contract_terms"
+    },
+    "beneficiar_scara": {
+      "source": "client.domiciliu_scara"
+    },
+    "beneficiar_strada": {
+      "source": "client.domiciliu_strada"
+    },
+    "beneficiar_tip": {
+      "source": "contract_terms"
+    },
+    "client_email": {
+      "source": "client.email"
+    },
+    "client_telefon": {
+      "source": "client.telefon"
+    },
+    "corespondenta_apartament": {
+      "source": "contract_terms"
+    },
+    "corespondenta_bloc": {
+      "source": "contract_terms"
+    },
+    "corespondenta_cod_postal": {
+      "source": "contract_terms"
+    },
+    "corespondenta_diferita": {
+      "source": "contract_terms"
+    },
+    "corespondenta_etaj": {
+      "source": "contract_terms"
+    },
+    "corespondenta_judet": {
+      "source": "contract_terms"
+    },
+    "corespondenta_localitate": {
+      "source": "contract_terms"
+    },
+    "corespondenta_numar": {
+      "source": "contract_terms"
+    },
+    "corespondenta_scara": {
+      "source": "contract_terms"
+    },
+    "corespondenta_strada": {
+      "source": "contract_terms"
+    },
+    "data_contract": {
+      "source": "work.data_contract"
+    },
+    "data_deviz": {
+      "source": "contract_terms"
+    },
+    "data_oferta": {
+      "source": "contract_terms"
+    },
+    "defalcare_avize": {
+      "source": "contract_terms"
+    },
+    "descriere_lucrare": {
+      "source": "work.descriere"
+    },
+    "documente_detectoare_beneficiar": {
+      "source": "contract_terms"
+    },
+    "durata_contract_zile": {
+      "source": "contract_terms"
+    },
+    "executant_apartament": {
+      "source": "company_config"
+    },
+    "executant_banca": {
+      "source": "company_config"
+    },
+    "executant_bloc": {
+      "source": "company_config"
+    },
+    "executant_cod_postal": {
+      "source": "company_config"
+    },
+    "executant_cui": {
+      "source": "company_config"
+    },
+    "executant_denumire": {
+      "source": "company_config"
+    },
+    "executant_email": {
+      "source": "company_config"
+    },
+    "executant_etaj": {
+      "source": "company_config"
+    },
+    "executant_iban": {
+      "source": "company_config"
+    },
+    "executant_judet": {
+      "source": "company_config"
+    },
+    "executant_localitate": {
+      "source": "company_config"
+    },
+    "executant_numar": {
+      "source": "company_config"
+    },
+    "executant_regcom": {
+      "source": "company_config"
+    },
+    "executant_reprezentant": {
+      "source": "company_config"
+    },
+    "executant_reprezentant_calitate": {
+      "source": "company_config"
+    },
+    "executant_scara": {
+      "source": "company_config"
+    },
+    "executant_strada": {
+      "source": "company_config"
+    },
+    "executant_telefon": {
+      "source": "company_config"
+    },
+    "executie_procent": {
+      "source": "derived"
+    },
+    "executie_suma": {
+      "source": "derived"
+    },
+    "gdpr_contact_dpo": {
+      "source": "company_config"
+    },
+    "gdpr_pastrare_acte": {
+      "source": "company_config"
+    },
+    "gdpr_pastrare_contabil": {
+      "source": "company_config"
+    },
+    "gdpr_pastrare_contract": {
+      "source": "company_config"
+    },
+    "gdpr_pastrare_tehnic": {
+      "source": "company_config"
+    },
+    "gdpr_transferuri": {
+      "source": "company_config"
+    },
+    "nr_contract": {
+      "source": "contract_terms"
+    },
+    "nr_deviz": {
+      "source": "contract_terms"
+    },
+    "nr_oferta": {
+      "source": "contract_terms"
+    },
+    "pif_suma": {
+      "source": "derived"
+    },
+    "valoare_asistenta_pif": {
+      "source": "contract_terms"
+    },
+    "valoare_avize": {
+      "source": "contract_terms"
+    },
+    "valoare_executie": {
+      "source": "derived"
+    },
+    "valoare_executie_receptie": {
+      "source": "contract_terms"
+    },
+    "valoare_proiect_verificare": {
+      "source": "derived"
+    },
+    "valoare_proiectare": {
+      "source": "contract_terms"
+    },
+    "valoare_totala": {
+      "source": "derived"
+    },
+    "valoare_verificare": {
+      "source": "contract_terms"
+    }
+  }
+}

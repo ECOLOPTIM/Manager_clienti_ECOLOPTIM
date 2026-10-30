@@ -19,9 +19,10 @@ from tests.test_permissions import PermissionCases
 from db import permissions
 from tests.test_iugn import IUGNChecks
 from tests.test_company import CompanyCases
+from tests.test_iugn_documents import ContractIssueCases
 
 
-class PostgresWorkflow(CompanyCases, IUGNChecks, unittest.TestCase):
+class PostgresWorkflow(ContractIssueCases, CompanyCases, IUGNChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         config = load_config()
@@ -52,7 +53,7 @@ class PostgresWorkflow(CompanyCases, IUGNChecks, unittest.TestCase):
     def setUp(self):
         permissions.clear_actor()
         with db._connect() as conn:
-            conn.execute('TRUNCATE iugn_evenimente, iugn_flux, clienti, lucrari, sarcini, inregistrari, atasamente, '
+            conn.execute('TRUNCATE iugn_contract_issues, iugn_contract_drafts, iugn_evenimente, iugn_flux, clienti, lucrari, sarcini, inregistrari, atasamente, '
                          'facturi, plati, documente_seq, contracte_seq, registru_seq_client '
                          'RESTART IDENTITY CASCADE')
         db.adauga_client({'nume': 'Test A', 'cod_intern': 'TEST-A'})

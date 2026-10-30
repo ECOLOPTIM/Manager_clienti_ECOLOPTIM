@@ -202,56 +202,63 @@ def assign_roles(lid, roles, *, expected_revision):
 def record_event(lid, key, occurred_on, *, expected_revision, note='', scheduled_for='', team=''):
     from db import db
     with closing(db._connect()) as conn, conn:
-        _work(conn, lid)
-        state = _checked_load(conn, lid, expected_revision)
-        if key not in rules.EVENT_LABELS:
-            raise ValueError('Eveniment necunoscut.')
-        if not can_record(state, key):
-            raise PermissionError('Evenimentul necesita persoana desemnata pentru acest rol.')
-        new_state = rules.record(state, key, occurred_on, note)
-        detail = {'note': str(note).strip()}
-        work_fields = {}
-        if key in {'executie_programata', 'programare_pif_primita'} | rules.RESCHEDULES.keys():
-            target = date.fromisoformat(str(scheduled_for))
-            if target < date.fromisoformat(str(occurred_on)):
-                raise ValueError('Data programata nu poate preceda primirea/stabilirea programarii.')
-            detail['scheduled_for'] = target.isoformat()
-            field = 'data_programare' if key in {'executie_programata', 'reprogramare_executie'} else 'data_programare_pif'
-            work_fields[field] = target.isoformat()
-        if key in {'executie_programata', 'echipa_pif_alocata', 'reprogramare_executie'}:
-            if not str(team).strip():
-                raise ValueError('Echipa este obligatorie.')
-            detail['team'] = str(team).strip()
-            work_fields['echipa' if key in {'executie_programata', 'reprogramare_executie'} else 'echipa_pif'] = detail['team']
-        if key in rules.RESCHEDULES:
-            schedule = 'executie_programata' if key == 'reprogramare_executie' else 'programare_pif_primita'
-            reopen = (['ordin_executie_predat'] if key == 'reprogramare_executie' else
-                      ['echipa_pif_alocata', 'dosar_pif_predat', 'nota_pif_transmisa'])
-            detail['previous_schedule'] = dict(state['facts'][schedule])
-            detail['reopened'] = {k: new_state['facts'].pop(k) for k in reopen if k in new_state['facts']}
-            new_state['facts'][schedule] = dict(new_state['facts'][schedule], scheduled_for=detail['scheduled_for'])
-            if key == 'reprogramare_executie':
-                new_state['facts'][schedule]['team'] = detail['team']
-            else:
-                work_fields['echipa_pif'] = ''
-        if key in {'executie_finalizata', 'pif_efectuata'}:
-            scheduled_key = 'executie_programata' if key == 'executie_finalizata' else 'programare_pif_primita'
-            if str(occurred_on) < state['facts'][scheduled_key]['scheduled_for']:
-                raise ValueError('Actualizeaza programarea inainte sa confirmi o finalizare anterioara ei.')
-        if key == 'contract_emis':
-            work_fields['data_contract'] = str(occurred_on)
-        for event, status in [('oferta_acceptata', 'OFERTAT'), ('contract_emis', 'CONTRACTAT'),
-                              ('executie_programata', 'PROGRAMAT'), ('executie_finalizata', 'EXECUTAT'),
-                              ('pif_efectuata', 'FINALIZAT')]:
-            if key == event:
-                work_fields['status'] = status
-        target_name = 'exceptions' if key in rules.EXCEPTIONS else 'facts'
-        new_state[target_name][key].update(detail)
-        _save(conn, lid, expected_revision, new_state, key, str(occurred_on), detail)
-        if work_fields:
-            db._execute(conn.cursor(), 'UPDATE lucrari SET ' + ', '.join(k+'=?' for k in work_fields)
-                        + ', revision=revision+1 WHERE id=?', (*work_fields.values(), int(lid)))
+        record_event_in_transaction(conn, lid, key, occurred_on, expected_revision=expected_revision,
+                                    note=note, scheduled_for=scheduled_for, team=team)
 
+
+def record_event_in_transaction(conn, lid, key, occurred_on, *, expected_revision, note='', scheduled_for='', team=''):
+    """Use the caller's transaction when issuance and workflow must commit together."""
+    from db import db
+    permissions.require('write')
+    _work(conn, lid)
+    state = _checked_load(conn, lid, expected_revision)
+    if key not in rules.EVENT_LABELS:
+        raise ValueError('Eveniment necunoscut.')
+    if not can_record(state, key):
+        raise PermissionError('Evenimentul necesita persoana desemnata pentru acest rol.')
+    new_state = rules.record(state, key, occurred_on, note)
+    detail = {'note': str(note).strip()}
+    work_fields = {}
+    if key in {'executie_programata', 'programare_pif_primita'} | rules.RESCHEDULES.keys():
+        target = date.fromisoformat(str(scheduled_for))
+        if target < date.fromisoformat(str(occurred_on)):
+            raise ValueError('Data programata nu poate preceda primirea/stabilirea programarii.')
+        detail['scheduled_for'] = target.isoformat()
+        field = 'data_programare' if key in {'executie_programata', 'reprogramare_executie'} else 'data_programare_pif'
+        work_fields[field] = target.isoformat()
+    if key in {'executie_programata', 'echipa_pif_alocata', 'reprogramare_executie'}:
+        if not str(team).strip():
+            raise ValueError('Echipa este obligatorie.')
+        detail['team'] = str(team).strip()
+        work_fields['echipa' if key in {'executie_programata', 'reprogramare_executie'} else 'echipa_pif'] = detail['team']
+    if key in rules.RESCHEDULES:
+        schedule = 'executie_programata' if key == 'reprogramare_executie' else 'programare_pif_primita'
+        reopen = (['ordin_executie_predat'] if key == 'reprogramare_executie' else
+                  ['echipa_pif_alocata', 'dosar_pif_predat', 'nota_pif_transmisa'])
+        detail['previous_schedule'] = dict(state['facts'][schedule])
+        detail['reopened'] = {k: new_state['facts'].pop(k) for k in reopen if k in new_state['facts']}
+        new_state['facts'][schedule] = dict(new_state['facts'][schedule], scheduled_for=detail['scheduled_for'])
+        if key == 'reprogramare_executie':
+            new_state['facts'][schedule]['team'] = detail['team']
+        else:
+            work_fields['echipa_pif'] = ''
+    if key in {'executie_finalizata', 'pif_efectuata'}:
+        scheduled_key = 'executie_programata' if key == 'executie_finalizata' else 'programare_pif_primita'
+        if str(occurred_on) < state['facts'][scheduled_key]['scheduled_for']:
+            raise ValueError('Actualizeaza programarea inainte sa confirmi o finalizare anterioara ei.')
+    if key == 'contract_emis':
+        work_fields['data_contract'] = str(occurred_on)
+    for event, status in [('oferta_acceptata', 'OFERTAT'), ('contract_emis', 'CONTRACTAT'),
+                          ('executie_programata', 'PROGRAMAT'), ('executie_finalizata', 'EXECUTAT'),
+                          ('pif_efectuata', 'FINALIZAT')]:
+        if key == event:
+            work_fields['status'] = status
+    target_name = 'exceptions' if key in rules.EXCEPTIONS else 'facts'
+    new_state[target_name][key].update(detail)
+    _save(conn, lid, expected_revision, new_state, key, str(occurred_on), detail)
+    if work_fields:
+        db._execute(conn.cursor(), 'UPDATE lucrari SET ' + ', '.join(k+'=?' for k in work_fields)
+                    + ', revision=revision+1 WHERE id=?', (*work_fields.values(), int(lid)))
 
 def history(lid):
     from db import db

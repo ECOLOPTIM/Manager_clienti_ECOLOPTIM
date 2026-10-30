@@ -81,6 +81,8 @@ def _init_postgres():
             migrate(conn)
             from db.company import migrate as migrate_company
             migrate_company(conn)
+            from db.iugn_documents import migrate as migrate_contracts
+            migrate_contracts(conn)
             cur.execute('UPDATE ecoloptim_schema_version SET version=2 WHERE version=1')
 
 
@@ -240,6 +242,8 @@ def _migrate_schema(conn: sqlite3.Connection):
     migrate(conn)
     from db.company import migrate as migrate_company
     migrate_company(conn)
+    from db.iugn_documents import migrate as migrate_contracts
+    migrate_contracts(conn)
 
     conn.commit()
 
