@@ -61,10 +61,11 @@ class ContractFormUI(unittest.TestCase):
         app=AppTest.from_string(APP,default_timeout=15);app.session_state['test_lid']=new_lid
         app.run()
         self.assertFalse(app.exception)
-        self.assertEqual(next(x for x in app.text_input if x.label=='Numar CI').value,'012345')
+        self.assertFalse(any(x.label in ('Numar CI','Nume beneficiar / reprezentant','Serie CI') for x in app.text_input))
+        self.assertTrue(any(b.label=='Editeaza clientul' for b in app.button))
         self.assertEqual(next(x for x in app.text_input if x.label=='Numar deviz-oferta').value,'')
         self.assertEqual(next(x for x in app.number_input if x.label=='Proiectare cu TVA').value,0)
-        self.assertEqual(next(x for x in app.text_input if x.label=='Nume beneficiar / reprezentant').value,docs.open_form(new_lid)['client']['nume'])
+        self.assertTrue(any('Client demonstrativ' in x.value for x in app.markdown))
 
     def test_browser_preview_then_issue_and_reopen(self):
         lid,bundle,terms=self.setup_contract()

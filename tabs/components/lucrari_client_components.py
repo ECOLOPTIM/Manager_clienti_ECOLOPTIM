@@ -245,6 +245,14 @@ def render_documente_panel(
         st.error(f"Nu găsesc template-ul: {template_path}")
         return
 
+    from db import company
+    firm=company.get()['values']
+    required_company=('executant_denumire','executant_cui','executant_regcom','executant_reprezentant',
+                      'executant_judet','executant_localitate','executant_strada','executant_numar')
+    missing_company=[n for n in required_company if not str(firm.get(n) or '').strip()]
+    if missing_company and not is_excel_situatie_plata:
+        st.warning('Completeaza identificarea firmei si sediul in Date generale inainte de generarea documentului.')
+
     def build_context() -> dict:
         valoare_tva = float(lucrare.get("valoare_contractata") or 0)
         valoare_fara_tva = (valoare_tva / 1.21) if valoare_tva else 0.0
@@ -253,13 +261,12 @@ def render_documente_panel(
         ctx = {
             "data_emitere": datetime.now().strftime("%d.%m.%Y"),
             "lucrare_id": str(lucrare_id),
-            "executant_denumire": "ECOLOPTIM SRL",
-            "executant_sediu": "Str. Traian, Nr.77, Bl.A1, Sc.1, Ap.3",
-            "executant_cui": "RO17199758",
-            "executant_regcom": "J17/255/2005",
-            "executant_iban": "RO43RZBR0000060008480911",
-            "executant_banca": "Raiffeisen Bank",
-            "executant_reprezentant": "BURUIANA GELU",
+            **{n:firm.get(n) or '' for n in ('executant_denumire','executant_cui','executant_regcom',
+                                            'executant_iban','executant_banca','executant_reprezentant')},
+            "executant_sediu": ', '.join(label+' '+str(firm['executant_'+part])
+                for part,label in (('judet','Jud.'),('localitate','Loc.'),('strada','Str.'),('numar','Nr.'),
+                                   ('bloc','Bl.'),('scara','Sc.'),('etaj','Et.'),('apartament','Ap.'))
+                if firm.get('executant_'+part)),
 
             "beneficiar_nume": safe_str(client.get("nume")),
             "beneficiar_localitate": safe_str(client.get("domiciliu_localitate")),
@@ -354,7 +361,7 @@ def render_documente_panel(
     else:
         d1, d2, _ = st.columns([1.3, 1.3, 3])
 
-        if d1.button("Generează DOCX", key=f"{PREFIX}gen_docx_{client_id}_{lucrare_id}"):
+        if d1.button("Generează DOCX", key=f"{PREFIX}gen_docx_{client_id}_{lucrare_id}", disabled=bool(missing_company)):
             if not require_docxtpl():
                 st.stop()
             filename_docx = build_filename("docx")
@@ -366,7 +373,7 @@ def render_documente_panel(
             st.success(f"DOCX salvat: {filename_docx}")
             st.download_button("⬇️ Descarcă DOCX", data=docx_bytes, file_name=filename_docx, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-        if d2.button("Generează PDF", key=f"{PREFIX}gen_pdf_{client_id}_{lucrare_id}"):
+        if d2.button("Generează PDF", key=f"{PREFIX}gen_pdf_{client_id}_{lucrare_id}", disabled=bool(missing_company)):
             if not require_docxtpl() or not require_word_pdf():
                 st.stop()
             filename_pdf = build_filename("pdf")
@@ -681,6 +688,9 @@ def render_add_lucrare_form(user: str, client_id: int, client_row: pd.Series):
     st.subheader("➕ Adăugare lucrare")
     st.caption('Instalatia de utilizare noua porneste in starea OFERTAT. '
                'Contractul, persoanele desemnate si programarile se confirma ulterior din Flux birou.')
+    from tabs.components import work_address
+    address_key=f'{PREFIX}add_address_{client_id}'
+    work_address.copy_control(client_row,address_key)
     with st.form(f"{PREFIX}form_add_{client_id}", clear_on_submit=False):
         valori = {}
         r1 = st.columns([3, 2, 2])
@@ -733,16 +743,7 @@ def render_add_lucrare_form(user: str, client_id: int, client_row: pd.Series):
             valori["sef_echipa_pif"] = ""
 
         st.markdown("### Adresă lucrare (obligatoriu)")
-        copy = st.checkbox("Copiază automat din 'Loc consum' al clientului", value=True, key=f"{PREFIX}add_copy_consum_{client_id}")
-        defv = lambda k: safe_str(client_row.get(k)) if copy else ""
-
-        rAdr = st.columns([1, 2, 3, 1, 1, 1])
-        valori["adresa_judet"] = rAdr[0].text_input("Județ", value=defv("consum_judet"), key=f"{PREFIX}add_adr_j_{client_id}")
-        valori["adresa_localitate"] = rAdr[1].text_input("Localitate", value=defv("consum_localitate"), key=f"{PREFIX}add_adr_l_{client_id}")
-        valori["adresa_strada"] = rAdr[2].text_input("Stradă", value=defv("consum_strada"), key=f"{PREFIX}add_adr_s_{client_id}")
-        valori["adresa_numar"] = rAdr[3].text_input("Număr", value=defv("consum_numar"), key=f"{PREFIX}add_adr_n_{client_id}")
-        valori["adresa_bloc"] = rAdr[4].text_input("Bloc", value=defv("consum_bloc"), key=f"{PREFIX}add_adr_b_{client_id}")
-        valori["adresa_apartament"] = rAdr[5].text_input("Apartament", value=defv("consum_apartament"), key=f"{PREFIX}add_adr_a_{client_id}")
+        valori.update(work_address.fields({},address_key))
 
         if valori["tip_lucrare"] in TIPURI_CU_DATE_DGSR:
             st.markdown("### Date fixe DGSR / extindere")
@@ -769,8 +770,9 @@ def render_add_lucrare_form(user: str, client_id: int, client_row: pd.Series):
             valori["contract_prestari_servicii"] = ""
             valori["numar_conventie_tehnica"] = ""
 
-        valori["observatii"] = st.text_area("Observații", key=f"{PREFIX}add_obs_{client_id}", height=90)
-        valori["descriere"] = st.text_area("Descriere lucrare", key=f"{PREFIX}add_descriere_{client_id}", height=90)
+        notes=st.columns(2)
+        valori["observatii"] = notes[1].text_area("Observații", key=f"{PREFIX}add_obs_{client_id}", height=90)
+        valori["descriere"] = notes[0].text_area("Descriere lucrare", key=f"{PREFIX}add_descriere_{client_id}", height=90)
 
         b1, b2, _ = st.columns([1.3, 1.3, 6])
         submit = b1.form_submit_button("💾 Salvează lucrarea", use_container_width=True)
@@ -806,6 +808,8 @@ def render_add_lucrare_form(user: str, client_id: int, client_row: pd.Series):
             valori["client_id"] = int(client_id)
             valori["created_by"] = user
             db.adauga_lucrare(valori)
+            for state_key in list(st.session_state):
+                if state_key.startswith(address_key):st.session_state.pop(state_key,None)
 
             st.success("Lucrare adăugată cu succes!")
             st.session_state[f"{PREFIX}add_open_{client_id}"] = False
@@ -838,6 +842,9 @@ def render_edit_lucrare_form(client_id: int, df: pd.DataFrame):
             for key in list(st.session_state):
                 if key.startswith(f"{PREFIX}edit_") and key.endswith(suffix):
                     del st.session_state[key]
+            for state_key in list(st.session_state):
+                if state_key.startswith(f"iugn_address_{client_id}_{lucrare_id}"):
+                    st.session_state.pop(state_key,None)
             st.session_state.pop(snapshot_key, None)
             st.session_state.pop(conflict_key, None)
             st.rerun()
@@ -850,7 +857,7 @@ def render_edit_lucrare_form(client_id: int, df: pd.DataFrame):
         render_work_details(row, client_id, edit_key, snapshot_key, conflict_key)
         return
     with st.form(f"{PREFIX}form_edit_{lucrare_id}_{client_id}", clear_on_submit=False):
-        valori = {}
+        valori = {k: row.get(k) or "" for k in ("adresa_scara", "adresa_etaj", "adresa_cod_postal")}
 
         r1 = st.columns([3, 2, 2])
         valori["tip_lucrare"] = r1[0].selectbox("Tip lucrare", TIPURI_LUCRARE, index=TIPURI_LUCRARE.index(row["tip_lucrare"]) if row["tip_lucrare"] in TIPURI_LUCRARE else 0, key=f"{PREFIX}edit_tip_{lucrare_id}_{client_id}")

@@ -72,7 +72,7 @@ class ContractIssueCases:
         self.assertEqual(values['beneficiar_ci_nr'],'012345')
         self.assertEqual(values['beneficiar_ci_serie'],terms['beneficiar_ci_serie'])
         self.assertEqual(values['beneficiar_judet'],terms['beneficiar_judet'])
-        self.assertTrue(new['beneficiary_inherited'])
+        self.assertFalse(new['beneficiary_inherited'])
         self.assertEqual(new['terms'],{})
         for key in ('beneficiar_cnp','nr_contract','nr_oferta','data_contract','valoare_proiectare','adresa_strada','corespondenta_strada'):
             self.assertNotIn(key,values)
@@ -91,7 +91,7 @@ class ContractIssueCases:
         new=docs.open_form(self.new_contract_work())
         self.assertEqual(new['beneficiary_defaults']['beneficiar_ci_nr'],'999999')
         self.assertEqual(new['beneficiary_defaults']['client_telefon'],'0700000000')
-        self.assertNotIn('beneficiar_ci_serie',new['beneficiary_defaults'])
+        self.assertEqual(new['beneficiary_defaults']['beneficiar_ci_serie'],bundle['client']['ci_serie'])
         self.assertEqual(new['beneficiary_defaults']['beneficiar_nume'],new['client']['nume'])
 
     def test_current_draft_is_not_replaced_by_beneficiary_prefill(self):
@@ -100,8 +100,9 @@ class ContractIssueCases:
         own=dict(terms,beneficiar_ci_nr='444444',beneficiar_strada='')
         docs.save_draft(new_lid,own,expected_revision=0)
         new=docs.open_form(new_lid)
-        self.assertEqual(new['terms']['beneficiar_ci_nr'],'444444')
-        self.assertEqual(new['terms']['beneficiar_strada'],'')
+        self.assertNotIn('beneficiar_ci_nr',new['terms'])
+        self.assertNotIn('beneficiar_strada',new['terms'])
+        self.assertEqual(docs.canonical_terms(new['client'],new['work'],own)['beneficiar_ci_nr'],'012345')
 
     def test_cnp_is_not_copied_from_client_or_legacy_draft_into_contract_snapshot(self):
         lid,bundle,terms=self.setup_contract()
@@ -114,6 +115,44 @@ class ContractIssueCases:
         docs.issue(lid,bundle,terms)
         snapshot=docs.open_form(lid)['issued']['snapshot']
         self.assertNotIn('0000000000000',snapshot)
+
+    def test_client_profile_wins_over_work_draft_and_issued_snapshot_stays_fixed(self):
+        import json
+        lid,bundle,terms=self.setup_contract()
+        terms=dict(terms,beneficiar_ci_nr='999999',adresa_strada='Adresa gresita')
+        docs.issue(lid,bundle,terms)
+        original=docs.open_form(lid)['issued']['snapshot']
+        ctx=json.loads(original)['context']
+        self.assertEqual(ctx['beneficiar_ci_nr'],'012345')
+        self.assertNotEqual(ctx['adresa_strada'],'Adresa gresita')
+        work=db.get_lucrare(lid)
+        db.modifica_client(1,{'domiciliu_strada':'Domiciliu nou','ci_numar':'888888'})
+        self.assertEqual(db.get_lucrare(lid),work)
+        self.assertEqual(docs.open_form(lid)['issued']['snapshot'],original)
+        new=docs.open_form(self.new_contract_work())
+        self.assertEqual(new['beneficiary_defaults']['beneficiar_ci_nr'],'888888')
+        self.assertEqual(new['beneficiary_defaults']['beneficiar_strada'],'Domiciliu nou')
+
+    def test_reviewed_profile_blank_fields_stay_blank_and_stale_save_is_rejected(self):
+        lid,bundle,terms=self.setup_contract()
+        before=bundle['client']
+        db.modifica_client(1,{'ci_emitent':''},expected_revision=before['profile_revision'])
+        self.assertEqual(docs.open_form(lid)['beneficiary_defaults']['beneficiar_ci_emitent'],'')
+        with self.assertRaisesRegex(ValueError,'alta sesiune'):
+            db.modifica_client(1,{'ci_numar':'999999'},expected_revision=before['profile_revision'])
+        self.assertEqual(docs.open_form(lid)['client']['ci_numar'],'012345')
+
+    def test_legacy_client_profile_recovers_own_contract_data_for_review(self):
+        lid,bundle,terms=self.setup_contract()
+        with closing(db._connect()) as conn,conn:
+            db._execute(conn.cursor(),"UPDATE clienti SET profile_saved=0,ci_serie='',ci_numar='',ci_emitent='',ci_data='' WHERE id=1",())
+            db._execute(conn.cursor(),'UPDATE iugn_contract_drafts SET payload=? WHERE lucrare_id=?',(docs._dump(terms),lid))
+        with closing(db._connect()) as conn:
+            client=docs._row(conn,'SELECT * FROM clienti WHERE id=1',())
+            recovered,inherited=docs._beneficiary_defaults(conn,client,0)
+        self.assertTrue(inherited)
+        self.assertEqual(recovered['beneficiar_ci_nr'],'012345')
+        self.assertNotIn('adresa_strada',recovered)
 
     def bind_contract_admin(self):
         permissions.clear_actor()
@@ -190,8 +229,12 @@ class ContractIssueCases:
         terms['data_contract']=date.today().isoformat()
         firm.update(autorizatie_proiectare_expirare='2099-12-31',autorizatie_executie_expirare='2099-12-31')
         s=company.get();company.save(firm,expected_revision=s['revision'])
+        identity={source:terms.get(name,client.get(source,'')) for name,source in ic.CLIENT_FIELDS.items()}
+        identity.update(profile_saved=1,nume='Client demonstrativ',email='client@example.invalid')
+        db.modifica_client(1,identity)
         db.adauga_lucrare({'client_id':1,'tip_lucrare':'Instalatie de utilizare noua',
-                          'valoare_contractata':2800,'descriere':'Centrala & aragaz'})
+                          'valoare_contractata':2800,'descriere':'Centrala & aragaz',
+                          **{k:v for k,v in terms.items() if k.startswith('adresa_')}})
         lid=int(db.lista_lucrari_client(1).iloc[0]['id'])
         for key in ('oferta_acceptata','documente_complete'):
             iugn.record_event(lid,key,date.today().isoformat(),expected_revision=iugn.get(lid)['revision'])

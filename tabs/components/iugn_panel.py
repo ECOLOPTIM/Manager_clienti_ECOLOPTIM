@@ -11,17 +11,21 @@ def render_work_details(row, client_id, edit_key, snapshot_key, conflict_key):
     lid = int(row['id'])
     st.info('Rolurile, etapele si programarile se modifica din Flux birou. '
             'Aici poti actualiza adresa, descrierea si observatiile.')
+    from tabs.components import work_address
+    client=db.lista_clienti().query('id == @client_id').iloc[0]
+    address_key=f'iugn_address_{client_id}_{lid}'
+    work_address.copy_control(client,address_key)
     with st.form(f'iugn_details_{client_id}_{lid}'):
         values = dict(row)
-        for field, label in [('adresa_judet', 'Judet'), ('adresa_localitate', 'Localitate'),
-                             ('adresa_strada', 'Strada'), ('adresa_numar', 'Numar'),
-                             ('adresa_bloc', 'Bloc'), ('adresa_apartament', 'Apartament')]:
-            values[field] = st.text_input(label, value=str(row.get(field) or ''))
-        values['descriere'] = st.text_area('Descriere lucrare', value=str(row.get('descriere') or ''))
-        values['observatii'] = st.text_area('Observatii', value=str(row.get('observatii') or ''))
+        values.update(work_address.fields(row,address_key))
+        cols=st.columns(2)
+        values['descriere'] = cols[0].text_area('Descriere lucrare', value=str(row.get('descriere') or ''))
+        values['observatii'] = cols[1].text_area('Observatii', value=str(row.get('observatii') or ''))
         save = st.form_submit_button('Salveaza detaliile lucrarii')
         cancel = st.form_submit_button('Inchide editarea')
     if cancel:
+        for state_key in list(st.session_state):
+            if state_key.startswith(address_key):st.session_state.pop(state_key,None)
         for key in (edit_key, snapshot_key, conflict_key):
             st.session_state.pop(key, None)
         st.rerun()
@@ -37,6 +41,8 @@ def render_work_details(row, client_id, edit_key, snapshot_key, conflict_key):
         except (ValueError, PermissionError) as exc:
             st.error(str(exc))
         else:
+            for state_key in list(st.session_state):
+                if state_key.startswith(address_key):st.session_state.pop(state_key,None)
             for key in (edit_key, snapshot_key, conflict_key):
                 st.session_state.pop(key, None)
             st.rerun()

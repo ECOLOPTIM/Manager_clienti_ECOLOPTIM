@@ -99,281 +99,13 @@ def show(user):
             st.rerun()
         return
 
-    # =========================
-    # ADD CLIENT
-    # =========================
-    if st.session_state.get("add_client_open"):
-        st.subheader("➕ Adăugare client")
-
-        with st.form("add_client_form", clear_on_submit=False):
-            col_status, col_obs = st.columns([1.3, 2.7])
-            status = col_status.selectbox("STATUS", STATUS_OPTIONS, key="add_status")
-            observatii = col_obs.text_area("OBSERVAȚII", key="add_obs")
-
-            col_nume, col_email, col_telefon = st.columns([2, 2, 1.7])
-            nume = col_nume.text_input("NUME COMPLET", key="add_nume")
-            email = col_email.text_input("EMAIL", key="add_email")
-            telefon = col_telefon.text_input("TELEFON", key="add_telefon")
-
-            col_firma, col_cod, col_scor = st.columns([2, 2, 1])
-            firma = col_firma.text_input("FIRMĂ CLIENT", key="add_firma")
-            cod_intern = col_cod.text_input("COD INTERN", key="add_cod")
-            scor = col_scor.number_input("SCOR", value=0, key="add_scor")
-            remark = st.text_input("REMARK", key="add_remark")
-
-            # ---- DATE ACTE (pentru contracte) ----
-            st.markdown("#### ACTE IDENTITATE (pentru contracte)")
-            col_cnp, col_ci_serie, col_ci_nr = st.columns([2, 1, 1.5])
-            cnp = col_cnp.text_input("CNP", key="add_cnp")
-            ci_serie = col_ci_serie.text_input("CI SERIE", key="add_ci_serie")
-            ci_numar = col_ci_nr.text_input("CI NUMĂR", key="add_ci_numar")
-
-            col_emit, col_data = st.columns([2, 1.5])
-            ci_emitent = col_emit.text_input("CI EMITENT (ex: SPCLEP Galați)", key="add_ci_emitent")
-            ci_data = col_data.text_input("CI DATA (ex: 24.09.2024)", key="add_ci_data")
-
-            st.markdown("#### ADRESA DOMICILIU")
-            col_jud, col_loc, col_str, col_nr, col_bloc, col_sc, col_et, col_ap = st.columns([1.2, 2, 2, 1, 1, 1, 1, 1])
-            domiciliu_judet = col_jud.text_input("JUDEȚ", key="add_dom_judet")
-            domiciliu_localitate = col_loc.text_input("LOCALITATE", key="add_dom_loc")
-            domiciliu_strada = col_str.text_input("STRADA", key="add_dom_str")
-            domiciliu_numar = col_nr.text_input("NUMĂR", key="add_dom_nr")
-            domiciliu_bloc = col_bloc.text_input("BLOC", key="add_dom_bloc")
-            domiciliu_scara = col_sc.text_input("SCARĂ", key="add_dom_scara")
-            domiciliu_etaj = col_et.text_input("ETAJ", key="add_dom_etaj")
-            domiciliu_apartament = col_ap.text_input("APARTAMENT", key="add_dom_ap")
-
-            aceeasi_adresa = st.checkbox(
-                "Adresa de loc consum este identică cu domiciliu",
-                value=False,
-                key="add_same_addr",
-            )
-
-            st.markdown("#### ADRESA LOC CONSUM")
-            if aceeasi_adresa:
-                consum_judet = domiciliu_judet
-                consum_localitate = domiciliu_localitate
-                consum_strada = domiciliu_strada
-                consum_numar = domiciliu_numar
-                consum_bloc = domiciliu_bloc
-                consum_apartament = domiciliu_apartament
-                st.info("Adresa de loc consum va fi preluată din domiciliu.")
-            else:
-                col_jud2, col_loc2, col_str2, col_nr2, col_bloc2, col_ap2 = st.columns([1.2, 2, 2, 1, 1, 1])
-                consum_judet = col_jud2.text_input("JUDEȚ", key="add_con_judet")
-                consum_localitate = col_loc2.text_input("LOCALITATE", key="add_con_loc")
-                consum_strada = col_str2.text_input("STRADA", key="add_con_strada")
-                consum_numar = col_nr2.text_input("NUMĂR", key="add_con_nr")
-                consum_bloc = col_bloc2.text_input("BLOC", key="add_con_bloc")
-                consum_apartament = col_ap2.text_input("APARTAMENT", key="add_con_ap")
-
-            c1, c2, _ = st.columns([1.2, 1.2, 6])
-            with c1:
-                save_btn = st.form_submit_button("💾 SALVEAZĂ CLIENTUL", use_container_width=True)
-            with c2:
-                cancel_btn = st.form_submit_button("⛔ RENUNȚĂ", use_container_width=True)
-
-            if cancel_btn:
-                st.session_state["add_client_open"] = False
-                st.rerun()
-
-            if save_btn:
-                email_clean = str(email or "").strip()
-                telefon_clean = str(telefon or "").strip()
-                nume_clean = str(nume or "").strip()
-
-                if not nume_clean:
-                    st.error("Completează NUMELE clientului.")
-                elif not email_clean and not telefon_clean:
-                    st.error("Completează cel puțin EMAIL sau TELEFON.")
-                elif email_clean and ("@" not in email_clean or "." not in email_clean.split("@")[-1]):
-                    st.error("Adresa de email nu pare validă.")
-                elif telefon_clean and len(telefon_clean.replace(" ", "").replace("-", "")) < 7:
-                    st.error("Numărul de telefon pare prea scurt.")
-                else:
-                    valori = {
-                        "nume": nume_clean,
-                        "email": email_clean,
-                        "telefon": telefon_clean,
-                        "firma": firma,
-                        "status": status,
-                        "observatii": observatii,
-                        "cod_intern": cod_intern,
-                        "scor": scor,
-                        "remark": remark,
-                        "cnp": cnp,
-                        "ci_serie": ci_serie,
-                        "ci_numar": ci_numar,
-                        "ci_emitent": ci_emitent,
-                        "ci_data": ci_data,
-                        "domiciliu_judet": domiciliu_judet,
-                        "domiciliu_localitate": domiciliu_localitate,
-                        "domiciliu_strada": domiciliu_strada,
-                        "domiciliu_numar": domiciliu_numar,
-                        "domiciliu_bloc": domiciliu_bloc,
-                        "domiciliu_scara": domiciliu_scara,
-                        "domiciliu_etaj": domiciliu_etaj,
-                        "domiciliu_apartament": domiciliu_apartament,
-                        "consum_judet": consum_judet,
-                        "consum_localitate": consum_localitate,
-                        "consum_strada": consum_strada,
-                        "consum_numar": consum_numar,
-                        "consum_bloc": consum_bloc,
-                        "consum_apartament": consum_apartament,
-                    }
-                    db.adauga_client(valori)
-                    st.success(f"Clientul {nume_clean.upper()} a fost adăugat!")
-                    st.session_state["add_client_open"] = False
-                    st.rerun()
-
-        return
-
-    # =========================
-    # EDIT CLIENT
-    # =========================
-    if st.session_state.get("edit_client_id"):
-        client_id = st.session_state["edit_client_id"]
-        df_all = db.lista_clienti()
-        row = df_all[df_all["id"] == client_id].iloc[0]
-
-        st.subheader(f"✏️ Editare client — {str(row.get('nume', '')).upper()}")
-
-        with st.form(f"edit_client_form_{client_id}", clear_on_submit=False):
-            col_status, col_obs = st.columns([1.3, 2.7])
-            status = col_status.selectbox(
-                "STATUS",
-                STATUS_OPTIONS,
-                index=STATUS_OPTIONS.index(str(row["status"]).upper())
-                if str(row["status"]).upper() in STATUS_OPTIONS
-                else 0,
-                key="edit_status",
-            )
-            observatii = col_obs.text_area("OBSERVAȚII", value=str(row.get("observatii", "")), key="edit_obs")
-
-            col_nume, col_email, col_telefon = st.columns([2, 2, 1.7])
-            nume = col_nume.text_input("NUME COMPLET", value=str(row["nume"]), key="edit_nume")
-            email = col_email.text_input("EMAIL", value=str(row["email"]), key="edit_email")
-            telefon = col_telefon.text_input("TELEFON", value=str(row.get("telefon", "")), key="edit_telefon")
-
-            col_firma, col_cod, col_scor = st.columns([2, 2, 1])
-            firma = col_firma.text_input("FIRMĂ CLIENT", value=str(row.get("firma", "")), key="edit_firma")
-            cod_intern = col_cod.text_input("COD INTERN", value=str(row.get("cod_intern", "")), key="edit_cod")
-            scor = col_scor.number_input("SCOR", value=int(row.get("scor", 0)), key="edit_scor")
-            remark = st.text_input("REMARK", value=str(row.get("remark", "")), key="edit_remark")
-
-            # ---- DATE ACTE (pentru contracte) ----
-            st.markdown("#### ACTE IDENTITATE (pentru contracte)")
-            col_cnp, col_ci_serie, col_ci_nr = st.columns([2, 1, 1.5])
-            cnp = col_cnp.text_input("CNP", value=str(row.get("cnp", "")), key="edit_cnp")
-            ci_serie = col_ci_serie.text_input("CI SERIE", value=str(row.get("ci_serie", "")), key="edit_ci_serie")
-            ci_numar = col_ci_nr.text_input("CI NUMĂR", value=str(row.get("ci_numar", "")), key="edit_ci_numar")
-
-            col_emit, col_data = st.columns([2, 1.5])
-            ci_emitent = col_emit.text_input("CI EMITENT (ex: SPCLEP Galați)", value=str(row.get("ci_emitent", "")), key="edit_ci_emitent")
-            ci_data = col_data.text_input("CI DATA (ex: 24.09.2024)", value=str(row.get("ci_data", "")), key="edit_ci_data")
-
-            st.markdown("#### ADRESA DOMICILIU")
-            col_jud, col_loc, col_str, col_nr, col_bloc, col_sc, col_et, col_ap = st.columns([1.2, 2, 2, 1, 1, 1, 1, 1])
-            domiciliu_judet = col_jud.text_input("JUDEȚ", value=str(row.get("domiciliu_judet", "")), key="edit_dom_judet")
-            domiciliu_localitate = col_loc.text_input("LOCALITATE", value=str(row.get("domiciliu_localitate", "")), key="edit_dom_loc")
-            domiciliu_strada = col_str.text_input("STRADA", value=str(row.get("domiciliu_strada", "")), key="edit_dom_strada")
-            domiciliu_numar = col_nr.text_input("NUMĂR", value=str(row.get("domiciliu_numar", "")), key="edit_dom_nr")
-            domiciliu_bloc = col_bloc.text_input("BLOC", value=str(row.get("domiciliu_bloc", "")), key="edit_dom_bloc")
-            domiciliu_scara = col_sc.text_input("SCARĂ", value=str(row.get("domiciliu_scara", "")), key="edit_dom_scara")
-            domiciliu_etaj = col_et.text_input("ETAJ", value=str(row.get("domiciliu_etaj", "")), key="edit_dom_etaj")
-            domiciliu_apartament = col_ap.text_input("APARTAMENT", value=str(row.get("domiciliu_apartament", "")), key="edit_dom_ap")
-
-            same_addr_default = (
-                str(row.get("domiciliu_judet", "")) == str(row.get("consum_judet", ""))
-                and str(row.get("domiciliu_localitate", "")) == str(row.get("consum_localitate", ""))
-                and str(row.get("domiciliu_strada", "")) == str(row.get("consum_strada", ""))
-                and str(row.get("domiciliu_numar", "")) == str(row.get("consum_numar", ""))
-                and str(row.get("domiciliu_bloc", "")) == str(row.get("consum_bloc", ""))
-                and str(row.get("domiciliu_apartament", "")) == str(row.get("consum_apartament", ""))
-            )
-            aceeasi_adresa = st.checkbox(
-                "Adresa de loc consum este identică cu domiciliu",
-                value=same_addr_default,
-                key="edit_same_addr",
-            )
-
-            st.markdown("#### ADRESA LOC CONSUM")
-            if aceeasi_adresa:
-                consum_judet = domiciliu_judet
-                consum_localitate = domiciliu_localitate
-                consum_strada = domiciliu_strada
-                consum_numar = domiciliu_numar
-                consum_bloc = domiciliu_bloc
-                consum_apartament = domiciliu_apartament
-                st.info("Adresa de loc consum va fi preluată din domiciliu.")
-            else:
-                col_jud2, col_loc2, col_str2, col_nr2, col_bloc2, col_ap2 = st.columns([1.2, 2, 2, 1, 1, 1])
-                consum_judet = col_jud2.text_input("JUDEȚ", value=str(row.get("consum_judet", "")), key="edit_con_judet")
-                consum_localitate = col_loc2.text_input("LOCALITATE", value=str(row.get("consum_localitate", "")), key="edit_con_loc")
-                consum_strada = col_str2.text_input("STRADA", value=str(row.get("consum_strada", "")), key="edit_con_strada")
-                consum_numar = col_nr2.text_input("NUMĂR", value=str(row.get("consum_numar", "")), key="edit_con_nr")
-                consum_bloc = col_bloc2.text_input("BLOC", value=str(row.get("consum_bloc", "")), key="edit_con_bloc")
-                consum_apartament = col_ap2.text_input("APARTAMENT", value=str(row.get("consum_apartament", "")), key="edit_con_ap")
-
-            c1, c2, _ = st.columns([1.2, 1.2, 6])
-            with c1:
-                save_btn = st.form_submit_button("💾 SALVEAZĂ MODIFICĂRILE", use_container_width=True)
-            with c2:
-                cancel_btn = st.form_submit_button("⛔ ÎNCHIDE EDITAREA", use_container_width=True)
-
-            if cancel_btn:
-                del st.session_state["edit_client_id"]
-                st.rerun()
-
-            if save_btn:
-                email_clean = str(email or "").strip()
-                telefon_clean = str(telefon or "").strip()
-                nume_clean = str(nume or "").strip()
-
-                if not nume_clean:
-                    st.error("Completează NUMELE clientului.")
-                elif not email_clean and not telefon_clean:
-                    st.error("Completează cel puțin EMAIL sau TELEFON.")
-                elif email_clean and ("@" not in email_clean or "." not in email_clean.split("@")[-1]):
-                    st.error("Adresa de email nu pare validă.")
-                elif telefon_clean and len(telefon_clean.replace(" ", "").replace("-", "")) < 7:
-                    st.error("Numărul de telefon pare prea scurt.")
-                else:
-                    valori = {
-                        "nume": nume_clean,
-                        "email": email_clean,
-                        "telefon": telefon_clean,
-                        "firma": firma,
-                        "status": status,
-                        "observatii": observatii,
-                        "cod_intern": cod_intern,
-                        "scor": scor,
-                        "remark": remark,
-                        "cnp": cnp,
-                        "ci_serie": ci_serie,
-                        "ci_numar": ci_numar,
-                        "ci_emitent": ci_emitent,
-                        "ci_data": ci_data,
-                        "domiciliu_judet": domiciliu_judet,
-                        "domiciliu_localitate": domiciliu_localitate,
-                        "domiciliu_strada": domiciliu_strada,
-                        "domiciliu_numar": domiciliu_numar,
-                        "domiciliu_bloc": domiciliu_bloc,
-                        "domiciliu_scara": domiciliu_scara,
-                        "domiciliu_etaj": domiciliu_etaj,
-                        "domiciliu_apartament": domiciliu_apartament,
-                        "consum_judet": consum_judet,
-                        "consum_localitate": consum_localitate,
-                        "consum_strada": consum_strada,
-                        "consum_numar": consum_numar,
-                        "consum_bloc": consum_bloc,
-                        "consum_apartament": consum_apartament,
-                    }
-                    db.modifica_client(client_id, valori)
-                    st.success("DATELE CLIENTULUI AU FOST ACTUALIZATE!")
-                    del st.session_state["edit_client_id"]
-                    st.rerun()
-
+    if st.session_state.get("add_client_open") or st.session_state.get("edit_client_id"):
+        from tabs.components.client_profile import render_editor
+        client_id=st.session_state.get("edit_client_id")
+        if render_editor(client_id):
+            st.session_state.pop("add_client_open",None)
+            st.session_state.pop("edit_client_id",None)
+            st.rerun()
         return
 
     # =========================
@@ -387,8 +119,8 @@ def show(user):
         st.subheader("🗑️ Ștergere client")
         st.error(
             f"EȘTI SIGUR CĂ VREI SĂ ȘTERGI CLIENTUL '{str(row['nume']).upper()}' DIN "
-            f"'{str(row.get('consum_judet', '')).upper()}, {str(row['consum_localitate']).upper()}, "
-            f"{str(row['consum_strada']).upper()} NR. {str(row['consum_numar']).upper()}'?"
+            f"'{str(row.get('domiciliu_judet', '')).upper()}, {str(row['domiciliu_localitate']).upper()}, "
+            f"{str(row['domiciliu_strada']).upper()} NR. {str(row['domiciliu_numar']).upper()}'?"
         )
 
         if st.button("CONFIRMĂ ȘTERGEREA", key=f"confirm_del_{client_id}"):
@@ -444,21 +176,21 @@ def show(user):
     if status_select != "Toate":
         df_full = df_full[df_full["status"].astype(str).str.upper() == str(status_select).upper()]
 
-    toate_judetele = sorted(df_full["consum_judet"].dropna().astype(str).str.title().unique()) if not df_full.empty else []
+    toate_judetele = sorted(df_full["domiciliu_judet"].dropna().astype(str).str.title().unique()) if not df_full.empty else []
     judet_select = filter_cols[4].selectbox("Județ", ["Toate"] + toate_judetele, index=0, key=f"cli_j_{rid}")
 
     df_judet = df_full
     if judet_select != "Toate" and not df_judet.empty:
-        df_judet = df_judet[df_judet["consum_judet"].astype(str).str.title() == judet_select]
+        df_judet = df_judet[df_judet["domiciliu_judet"].astype(str).str.title() == judet_select]
 
-    toate_localitatile = sorted(df_judet["consum_localitate"].dropna().astype(str).str.title().unique()) if not df_judet.empty else []
+    toate_localitatile = sorted(df_judet["domiciliu_localitate"].dropna().astype(str).str.title().unique()) if not df_judet.empty else []
     localitate_select = filter_cols[5].selectbox("Localitate", ["Toate"] + toate_localitatile, index=0, key=f"cli_loc_{rid}")
 
     df_loc = df_judet
     if localitate_select != "Toate" and not df_loc.empty:
-        df_loc = df_loc[df_loc["consum_localitate"].astype(str).str.title() == localitate_select]
+        df_loc = df_loc[df_loc["domiciliu_localitate"].astype(str).str.title() == localitate_select]
 
-    toate_strazile = sorted(df_loc["consum_strada"].dropna().astype(str).str.title().unique()) if not df_loc.empty else []
+    toate_strazile = sorted(df_loc["domiciliu_strada"].dropna().astype(str).str.title().unique()) if not df_loc.empty else []
     strada_select = filter_cols[6].selectbox("Strada", ["Toate"] + toate_strazile, index=0, key=f"cli_str_{rid}")
     
     if filter_cols[7].button("Reset", key=f"cli_reset_{rid}"):
@@ -469,7 +201,7 @@ def show(user):
 
     df = df_loc
     if strada_select != "Toate" and not df.empty:
-        df = df[df["consum_strada"].astype(str).str.title() == strada_select]
+        df = df[df["domiciliu_strada"].astype(str).str.title() == strada_select]
 
     df = df.drop(columns=["__DATA"], errors="ignore")
 
@@ -554,9 +286,9 @@ def show(user):
                 st.caption(f"ID: {client_id} • Data: {data_ro}")
                 st.write(f"📧 {str(row.get('email','')).lower()} | 📞 {str(row.get('telefon',''))}")
                 st.write(
-                    f"📍 {str(row.get('consum_judet','')).upper()}, "
-                    f"{str(row.get('consum_localitate','')).upper()}, "
-                    f"{str(row.get('consum_strada','')).upper()} nr. {str(row.get('consum_numar',''))}"
+                    f"📍 {str(row.get('domiciliu_judet','')).upper()}, "
+                    f"{str(row.get('domiciliu_localitate','')).upper()}, "
+                    f"{str(row.get('domiciliu_strada','')).upper()} nr. {str(row.get('domiciliu_numar',''))}"
                 )
                 st.write(f"Status: {format_status(row.get('status',''))}")
                 st.write(
@@ -591,14 +323,14 @@ def show(user):
     else:
         st.markdown("<div class='clients-table'>", unsafe_allow_html=True)
         st.markdown("<div class='eco-card'>", unsafe_allow_html=True)
-        st.markdown("#### CLIENȚI (LOC CONSUM)")
+        st.markdown("#### CLIENȚI (DOMICILIU / SEDIU)")
 
         selected_id = st.session_state.get("selected_client_id")
         if selected_id is not None:
             sel_df = df[df["id"] == selected_id]
             if not sel_df.empty:
                 sel = sel_df.iloc[0]
-                meta = f"{str(sel.get('nume','')).upper()} • {str(sel.get('consum_localitate','')).upper()} • {str(sel.get('email','')).lower()}"
+                meta = f"{str(sel.get('nume','')).upper()} • {str(sel.get('domiciliu_localitate','')).upper()} • {str(sel.get('email','')).lower()}"
             else:
                 meta = f"Client ID: {selected_id}"
 
@@ -679,10 +411,10 @@ def show(user):
                       <div class="clip">{data_ro}</div>
                       <div class="clip">{str(row.get('nume','')).upper()}</div>
                       <div class="clip">{str(row.get('email','')).lower()}</div>
-                      <div class="clip">{str(row.get('consum_judet','')).upper()}</div>
-                      <div class="clip">{str(row.get('consum_localitate','')).upper()}</div>
-                      <div class="clip">{str(row.get('consum_strada','')).upper()}</div>
-                      <div class="clip">{str(row.get('consum_numar',''))}</div>
+                      <div class="clip">{str(row.get('domiciliu_judet','')).upper()}</div>
+                      <div class="clip">{str(row.get('domiciliu_localitate','')).upper()}</div>
+                      <div class="clip">{str(row.get('domiciliu_strada','')).upper()}</div>
+                      <div class="clip">{str(row.get('domiciliu_numar',''))}</div>
                       <div class="clip">{format_status(row.get('status',''))}</div>
                       <div class="clip num">{val_contract:,.2f}</div>
                       <div class="clip num">{fact_html}</div>
@@ -754,10 +486,10 @@ def show(user):
         "email",
         "telefon",
         "status",
-        "consum_judet",
-        "consum_localitate",
-        "consum_strada",
-        "consum_numar",
+        "domiciliu_judet",
+        "domiciliu_localitate",
+        "domiciliu_strada",
+        "domiciliu_numar",
         "VALOARE_CONTRACT",
         "FACTURAT",
         "SOLD",
@@ -772,10 +504,10 @@ def show(user):
             "email": "EMAIL",
             "telefon": "TELEFON",
             "status": "STATUS",
-            "consum_judet": "JUDET_CONSUM",
-            "consum_localitate": "LOCALITATE_CONSUM",
-            "consum_strada": "STRADA_CONSUM",
-            "consum_numar": "NUMAR_CONSUM",
+            "domiciliu_judet": "JUDET_DOMICILIU",
+            "domiciliu_localitate": "LOCALITATE_DOMICILIU",
+            "domiciliu_strada": "STRADA_DOMICILIU",
+            "domiciliu_numar": "NUMAR_DOMICILIU",
         }
     )
 

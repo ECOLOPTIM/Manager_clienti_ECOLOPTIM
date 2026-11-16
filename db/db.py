@@ -77,6 +77,7 @@ def _init_postgres():
                 cur.execute("SELECT version FROM ecoloptim_schema_version")
                 if cur.fetchall() not in ([(1,)], [(2,)]):
                     raise ValueError("Versiune de schema PostgreSQL incompatibila.")
+            _migrate_client_work_fields(conn)
             from db.iugn import migrate
             migrate(conn)
             from db.company import migrate as migrate_company
@@ -136,6 +137,22 @@ def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, col_name: 
         return
     cur = conn.cursor()
     _execute(cur, f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+
+
+def _migrate_client_work_fields(conn):
+    columns = {
+        'clienti': {'beneficiar_tip':'TEXT','beneficiar_cui':'TEXT','beneficiar_regcom':'TEXT',
+                    'beneficiar_reprezentant_calitate':'TEXT','beneficiar_banca':'TEXT',
+                    'beneficiar_iban':'TEXT','domiciliu_cod_postal':'TEXT',
+                    'profile_saved':'INTEGER DEFAULT 0','profile_revision':'INTEGER DEFAULT 0'},
+        'lucrari': {'adresa_scara':'TEXT','adresa_etaj':'TEXT','adresa_cod_postal':'TEXT'},
+    }
+    for table,fields in columns.items():
+        for name,kind in fields.items():
+            if DATABASE_URL:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {kind}')
+            else:
+                _add_column_if_missing(conn,table,name,kind)
 
 
 def _migrate_schema(conn: sqlite3.Connection):
@@ -227,6 +244,7 @@ def _migrate_schema(conn: sqlite3.Connection):
     _add_column_if_missing(conn, "clienti", "ci_data", "TEXT")
     _add_column_if_missing(conn, "clienti", "domiciliu_scara", "TEXT")
     _add_column_if_missing(conn, "clienti", "domiciliu_etaj", "TEXT")
+    _migrate_client_work_fields(conn)
 
     _add_column_if_missing(conn, "utilizatori", "rol", "TEXT")
     _add_column_if_missing(conn, "utilizatori", "activ", "INTEGER DEFAULT 1")
@@ -486,34 +504,25 @@ def _positive_amount(value, label: str) -> float:
     return amount
 
 
+CLIENT_COLUMNS = (
+    'nume','email','telefon','firma','status','observatii','cod_intern','scor','remark',
+    'cnp','ci_serie','ci_numar','ci_emitent','ci_data',
+    *('domiciliu_'+p for p in ('judet','localitate','strada','numar','bloc','scara','etaj','apartament','cod_postal')),
+    *('consum_'+p for p in ('judet','localitate','strada','numar','bloc','apartament')),
+    'beneficiar_tip','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate',
+    'beneficiar_banca','beneficiar_iban','profile_saved',
+)
+
+
 def adauga_client(valori: dict):
+    values = {k:valori.get(k,'') for k in CLIENT_COLUMNS}
+    values['profile_saved']=int(valori.get('profile_saved') or 0)
+    values['scor'] = int(values.get('scor',0) or 0)
+    values['data_adaugarii'] = str(datetime.datetime.now())
+    columns = list(values)
     with closing(_connect()) as conn, conn:
-        c = conn.cursor()
-        _execute(c, """
-            INSERT INTO clienti (
-                nume, email, telefon, firma, status, observatii, data_adaugarii, cod_intern, scor, remark,
-                domiciliu_judet, domiciliu_localitate, domiciliu_strada, domiciliu_numar, domiciliu_bloc, domiciliu_scara, domiciliu_etaj, domiciliu_apartament,
-                consum_judet, consum_localitate, consum_strada, consum_numar, consum_bloc, consum_apartament,
-                cnp, ci_serie, ci_numar, ci_emitent, ci_data
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            valori.get("nume", ""), valori.get("email", ""), valori.get("telefon", ""), valori.get("firma", ""),
-            valori.get("status", ""), valori.get("observatii", ""), str(datetime.datetime.now()),
-            valori.get("cod_intern", ""), int(valori.get("scor", 0) or 0), valori.get("remark", ""),
-            valori.get("domiciliu_judet", ""),
-            valori.get("domiciliu_localitate", ""), valori.get("domiciliu_strada", ""), valori.get("domiciliu_numar", ""),
-            valori.get("domiciliu_bloc", ""), valori.get("domiciliu_scara", ""), valori.get("domiciliu_etaj", ""), valori.get("domiciliu_apartament", ""),
-            valori.get("consum_judet", ""),
-            valori.get("consum_localitate", ""), valori.get("consum_strada", ""), valori.get("consum_numar", ""),
-            valori.get("consum_bloc", ""), valori.get("consum_apartament", ""),
-            valori.get("cnp", ""),
-            valori.get("ci_serie", ""),
-            valori.get("ci_numar", ""),
-            valori.get("ci_emitent", ""),
-            valori.get("ci_data", ""),
-        ])
-        conn.commit()
+        _execute(conn.cursor(), 'INSERT INTO clienti ('+','.join(columns)+') VALUES ('+
+                 ','.join('?' for _ in columns)+')', list(values.values()))
 
 
 def lista_clienti(filtru: str = "") -> pd.DataFrame:
@@ -537,34 +546,19 @@ def lista_clienti(filtru: str = "") -> pd.DataFrame:
         return _read_frame("SELECT * FROM clienti ORDER BY data_adaugarii DESC, id DESC", conn)
 
 
-def modifica_client(id_cli: int, valori: dict):
+def modifica_client(id_cli: int, valori: dict, *, expected_revision=None):
+    values = {k:v for k,v in valori.items() if k in CLIENT_COLUMNS}
+    if 'scor' in values: values['scor'] = int(values['scor'] or 0)
+    if not values: return
     with closing(_connect()) as conn, conn:
-        c = conn.cursor()
-        _execute(c, """UPDATE clienti SET
-            nume=?, email=?, telefon=?, firma=?, status=?, observatii=?, cod_intern=?, scor=?, remark=?,
-            domiciliu_judet=?, domiciliu_localitate=?, domiciliu_strada=?, domiciliu_numar=?, domiciliu_bloc=?, domiciliu_scara=?, domiciliu_etaj=?, domiciliu_apartament=?,
-            consum_judet=?, consum_localitate=?, consum_strada=?, consum_numar=?, consum_bloc=?, consum_apartament=?,
-            cnp=?, ci_serie=?, ci_numar=?, ci_emitent=?, ci_data=?
-            WHERE id=?""",
-                  [
-                      valori.get("nume", ""), valori.get("email", ""), valori.get("telefon", ""), valori.get("firma", ""),
-                      valori.get("status", ""), valori.get("observatii", ""), valori.get("cod_intern", ""),
-                      int(valori.get("scor", 0) or 0), valori.get("remark", ""),
-                      valori.get("domiciliu_judet", ""),
-                      valori.get("domiciliu_localitate", ""), valori.get("domiciliu_strada", ""),
-                      valori.get("domiciliu_numar", ""),
-                      valori.get("domiciliu_bloc", ""), valori.get("domiciliu_scara", ""), valori.get("domiciliu_etaj", ""), valori.get("domiciliu_apartament", ""),
-                      valori.get("consum_judet", ""),
-                      valori.get("consum_localitate", ""), valori.get("consum_strada", ""), valori.get("consum_numar", ""),
-                      valori.get("consum_bloc", ""), valori.get("consum_apartament", ""),
-                      valori.get("cnp", ""),
-                      valori.get("ci_serie", ""),
-                      valori.get("ci_numar", ""),
-                      valori.get("ci_emitent", ""),
-                      valori.get("ci_data", ""),
-                      int(id_cli)
-                  ])
-        conn.commit()
+        cur=conn.cursor()
+        sql='UPDATE clienti SET '+','.join(k+'=?' for k in values)+',profile_revision=COALESCE(profile_revision,0)+1 WHERE id=?'
+        args=[*values.values(),int(id_cli)]
+        if expected_revision is not None:
+            sql+=' AND COALESCE(profile_revision,0)=?';args.append(int(expected_revision))
+        _execute(cur,sql,args)
+        if cur.rowcount!=1:
+            raise ValueError('Clientul a fost modificat in alta sesiune sau nu mai exista. Reincarca fisa clientului.')
 
 
 def dependinte_client(id_cli: int) -> dict:
@@ -794,6 +788,7 @@ def adauga_lucrare(valori: dict):
         "adresa_numar",
         "adresa_bloc",
         "adresa_apartament",
+        "adresa_scara", "adresa_etaj", "adresa_cod_postal",
         "interval_orar",
         "echipa",
         "sef_echipa",
@@ -827,6 +822,7 @@ def adauga_lucrare(valori: dict):
         valori.get("adresa_numar", ""),
         valori.get("adresa_bloc", ""),
         valori.get("adresa_apartament", ""),
+        valori.get("adresa_scara", ""), valori.get("adresa_etaj", ""), valori.get("adresa_cod_postal", ""),
         valori.get("interval_orar", ""),
         valori.get("echipa", ""),
         valori.get("sef_echipa", ""),
@@ -915,6 +911,7 @@ def modifica_lucrare(lucrare_id: int, valori: dict, *, expected_revision: int):
         "adresa_numar",
         "adresa_bloc",
         "adresa_apartament",
+        "adresa_scara", "adresa_etaj", "adresa_cod_postal",
         "interval_orar",
         "echipa",
         "sef_echipa",
@@ -948,6 +945,7 @@ def modifica_lucrare(lucrare_id: int, valori: dict, *, expected_revision: int):
         valori.get("adresa_numar", ""),
         valori.get("adresa_bloc", ""),
         valori.get("adresa_apartament", ""),
+        valori.get("adresa_scara", ""), valori.get("adresa_etaj", ""), valori.get("adresa_cod_postal", ""),
         valori.get("interval_orar", ""),
         valori.get("echipa", ""),
         valori.get("sef_echipa", ""),

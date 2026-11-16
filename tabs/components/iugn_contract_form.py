@@ -68,6 +68,24 @@ def render(lid):
             else:st.download_button('Descarca contractul emis',data,file_name=issued['filename'],key=key+'_issued')
         else: st.error('Fisierul emis lipseste din arhiva. Restaureaza documentul din backup.')
         return
+    if st.button('Editeaza clientul',key=key+'_client_edit'):
+        st.session_state[key+'_editing_client']=True
+    if st.session_state.get(key+'_editing_client'):
+        from tabs.components.client_profile import render_editor
+        if render_editor(int(bundle['client']['id'])):
+            for state_key in list(st.session_state):
+                if state_key.startswith(key):st.session_state.pop(state_key,None)
+            st.rerun()
+        return
+    client=bundle['client']
+    st.markdown('**Beneficiar — din fisa clientului**')
+    st.write(str((client.get('firma') if client.get('beneficiar_tip')=='PJ' else client.get('nume')) or ''))
+    st.caption(' · '.join(str(client.get(k) or '') for k in ('nume','telefon','email') if client.get(k)))
+    if not client.get('profile_saved'):
+        st.warning('Verifica si salveaza datele beneficiarului din Editeaza clientul inainte de emitere.')
+    st.markdown('**Locul de consum — din lucrare**')
+    st.write(', '.join(str(bundle['work'].get('adresa_'+p) or '') for p in ('judet','localitate','strada','numar','bloc','apartament') if bundle['work'].get('adresa_'+p)))
+    st.caption('Adresa se modifica din editarea lucrarii.')
     missing=[COMPANY_FIELDS[n] for n,v in bundle['company']['values'].items()
              if not v and n in {'executant_email','autorizatie_proiectare_numar','autorizatie_proiectare_expirare',
                                 'autorizatie_executie_numar','autorizatie_executie_expirare'}]
@@ -78,6 +96,8 @@ def render(lid):
         st.caption('Datele beneficiarului lipsa din fisa clientului au fost preluate din documentele anterioare ale aceluiasi client. Verifica daca mai sunt actuale.')
     defaults.update({n:bundle['work'].get(src) or '' for n,src in contract.WORK_FIELDS.items()})
     defaults.update(contract.offer_as_estimate(bundle['terms']))
+    defaults.update(bundle['beneficiary_defaults'])
+    defaults.update({k:bundle['work'].get(k) or '' for k in contract.WORK_FIELDS if k.startswith('adresa_')})
     legacy=bundle['terms']
     if (legacy.get('nr_oferta') and legacy.get('nr_deviz') and legacy['nr_oferta']!=legacy['nr_deviz'] or
             legacy.get('data_oferta') and legacy.get('data_deviz') and _date(legacy['data_oferta'])!=_date(legacy['data_deviz'])):
@@ -90,38 +110,40 @@ def render(lid):
         defaults['defalcare_avize']='Nu sunt incluse avize in pret.'
     st.caption('Pentru previzualizare, datele GDPR sau devizul inca lipsa sunt marcate in document. '
                'Datele obligatorii se verifica integral inainte de emitere.')
-    kind=st.selectbox('Tip beneficiar',['PF','PJ'],index=1 if defaults.get('beneficiar_tip')=='PJ' else 0,key=key+'_kind')
+    kind=defaults.get('beneficiar_tip') or ('PJ' if client.get('firma') else 'PF')
     correspondence=st.checkbox('Adresa de corespondenta diferita',value=bool(defaults.get('corespondenta_diferita')),key=key+'_correspondence')
     st.caption('Devizul-oferta este un singur document, cu un singur numar si o singura data.')
-    values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence}
+    values={**{k:defaults.get(k,'') for k in docs.BENEFICIARY_FIELDS},
+            **{k:defaults.get(k,'') for k in contract.WORK_FIELDS if k.startswith('adresa_')},
+            'beneficiar_tip':kind,'corespondenta_diferita':correspondence}
     with st.form(key+'_form'):
         for group,names in [
-            ('Beneficiar', ['beneficiar_nume']+(['beneficiar_firma','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate'] if kind=='PJ'
-                else ['beneficiar_ci_serie','beneficiar_ci_nr','beneficiar_ci_emitent','beneficiar_ci_data'])+
-                ['client_telefon','client_email','beneficiar_banca','beneficiar_iban']),
-            ('Domiciliul sau sediul beneficiarului',['beneficiar_'+p for p in contract.ADDRESS_PARTS]),
-            ('Adresa lucrarii',['adresa_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa de corespondenta',['corespondenta_'+p for p in contract.ADDRESS_PARTS] if correspondence else []),
             ('Contract si deviz-oferta',['data_contract','nr_oferta','data_oferta','durata_contract_zile',*contract.deadlines.STAGE_DEFAULTS,'descriere_lucrare','documente_detectoare_beneficiar']),
             ('Pret si transe',[*contract.MONEY_INPUTS,'defalcare_avize','avans_procent']),
         ]:
             if not names:continue
             st.markdown('**'+group+'**')
+            short=[n for n in names if n not in ('descriere_lucrare','documente_detectoare_beneficiar','defalcare_avize')]
+            columns={}
+            for start in range(0,len(short),3):
+                columns.update(zip(short[start:start+3],st.columns(3)))
             for name in names:
+                field_ui=columns.get(name,st)
                 label=LABELS.get(name,name.split('_',1)[-1].replace('_',' ').capitalize())
                 val=defaults.get(name,'')
                 if name in contract.MONEY_INPUTS or name in ('avans_procent','durata_contract_zile') or name in contract.deadlines.STAGE_DEFAULTS:
                     fallback=50 if name=='avans_procent' else 90 if name=='durata_contract_zile' else contract.deadlines.STAGE_DEFAULTS.get(name,0)
                     try:number=float(val) if str(val) else float(fallback)
                     except (ValueError,TypeError):number=float(fallback)
-                    values[name]=st.number_input(label,value=number,min_value=0.0,step=1.0 if name in ('avans_procent','durata_contract_zile') or name in contract.deadlines.STAGE_DEFAULTS else 0.01,key=key+'_'+name)
+                    values[name]=field_ui.number_input(label,value=number,min_value=0.0,step=1.0 if name in ('avans_procent','durata_contract_zile') or name in contract.deadlines.STAGE_DEFAULTS else 0.01,key=key+'_'+name)
                 elif name.endswith('_data') or name.startswith('data_'):
                     dt=_date(val) or (date.today() if name=='data_contract' else None)
-                    chosen=st.date_input(label,value=dt,format='DD.MM.YYYY',key=key+'_'+name)
+                    chosen=field_ui.date_input(label,value=dt,format='DD.MM.YYYY',key=key+'_'+name)
                     values[name]=chosen.isoformat() if chosen else ''
                 elif name in ('descriere_lucrare','documente_detectoare_beneficiar','defalcare_avize'):
-                    values[name]=st.text_area(label,value=str(val),key=key+'_'+name)
-                else:values[name]=st.text_input(label,value=str(val),key=key+'_'+name)
+                    values[name]=field_ui.text_area(label,value=str(val),key=key+'_'+name)
+                else:values[name]=field_ui.text_input(label,value=str(val),key=key+'_'+name)
         save=st.form_submit_button('Salveaza ciorna contractului')
         check=st.form_submit_button('Verifica si previzualizeaza')
     if save or check:
@@ -145,7 +167,7 @@ def render(lid):
     if approved:
         st.download_button('Descarca previzualizarea DOCX',approved['data'],file_name=f'PREVIZUALIZARE_IUGN_L-{lid}.docx',key=key+'_download')
         st.caption('La emitere se folosesc datele previzualizate. Pentru modificari apasa din nou Verifica si previzualizeaza.')
-        if st.button('Emite si salveaza contractul in dosar',key=key+'_issue'):
+        if st.button('Emite si salveaza contractul in dosar',key=key+'_issue',disabled=not client.get('profile_saved')):
             try:
                 docs.issue(lid,bundle,approved['terms'])
             except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))

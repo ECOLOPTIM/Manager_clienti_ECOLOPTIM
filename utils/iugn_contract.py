@@ -20,6 +20,8 @@ TEMPLATE = Path(__file__).resolve().parents[1] / 'templates' / 'contract_iugn.do
 ADDRESS_PARTS = ('judet', 'localitate', 'strada', 'numar', 'bloc', 'scara', 'etaj', 'apartament', 'cod_postal')
 CLIENT_FIELDS = {
     'beneficiar_nume': 'nume', 'beneficiar_firma': 'firma',
+    **{k:k for k in ('beneficiar_tip','beneficiar_cui','beneficiar_regcom',
+                    'beneficiar_reprezentant_calitate','beneficiar_banca','beneficiar_iban')},
     'beneficiar_ci_serie': 'ci_serie',
     'beneficiar_ci_nr': 'ci_numar', 'beneficiar_ci_emitent': 'ci_emitent',
     'beneficiar_ci_data': 'ci_data', 'client_telefon': 'telefon', 'client_email': 'email',

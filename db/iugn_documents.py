@@ -51,6 +51,8 @@ BENEFICIARY_FIELDS = set(contract.CLIENT_FIELDS) | {
 
 
 def _beneficiary_defaults(conn,client,lid):
+    if client.get('profile_saved'):
+        return {k:client.get(src) or '' for k,src in contract.CLIENT_FIELDS.items()},False
     cur=conn.cursor()
     db._execute(cur,"""SELECT d.payload AS content,d.updated_at AS saved_at,'draft' AS source_kind
         FROM iugn_contract_drafts d JOIN lucrari l ON l.id=d.lucrare_id
@@ -120,7 +122,9 @@ def save_draft(lid,terms,*,expected_revision):
     actor=permissions.actor_username() or 'mentenanta locala'
     with closing(db._connect()) as conn, conn:
         if not db.DATABASE_URL: conn.execute('BEGIN IMMEDIATE')
-        _records(conn,int(lid),True)
+        client,work=_records(conn,int(lid),True)
+        if client.get('profile_saved'):
+            terms={k:v for k,v in terms.items() if k not in BENEFICIARY_FIELDS and not k.startswith('adresa_')}
         if _row(conn,'SELECT number FROM iugn_contract_issues WHERE lucrare_id=?',(lid,)):
             raise ValueError('Contractul este deja emis; documentul se pastreaza nemodificat.')
         cur=conn.cursor()
@@ -131,13 +135,22 @@ def save_draft(lid,terms,*,expected_revision):
     return expected_revision+1
 
 
+def canonical_terms(client,work,terms):
+    values=dict(terms)
+    if client.get('profile_saved'):
+        values.update({k:client.get(src) or '' for k,src in contract.CLIENT_FIELDS.items()})
+    # Work addresses belong to the work, including intentional empty components.
+    values.update({k:work.get(k) or '' for k in contract.WORK_FIELDS if k.startswith('adresa_')})
+    return values
+
+
 def preview(bundle,terms):
     permissions.require('write')
     firm=dict(bundle['company']['values'])
     for name in ('gdpr_pastrare_acte','gdpr_pastrare_contabil','gdpr_pastrare_contract','gdpr_pastrare_tehnic','gdpr_transferuri'):
         if not str(firm.get(name) or '').strip():
             firm[name]='NECONFIGURAT - numai pentru previzualizare'
-    draft=contract.offer_as_estimate(dict(terms,nr_contract='PREVIZUALIZARE'))
+    draft=contract.offer_as_estimate(dict(canonical_terms(bundle['client'],bundle['work'],terms),nr_contract='PREVIZUALIZARE'))
     if not str(draft.get('nr_deviz') or '').strip():draft['nr_deviz']='NECOMPLETAT'
     if not draft.get('data_deviz'):draft['data_deviz']=draft.get('data_contract') or date.today().isoformat()
     return contract.generate_contract(bundle['client'],bundle['work'],firm,draft)
@@ -172,6 +185,9 @@ def issue(lid,bundle,terms):
                 raise PermissionError('Emiterea necesita persoana desemnata pentru rolul comercial.')
             reason=rules.blocked_reason(flow['state'],'contract_emis')
             if reason: raise ValueError(reason)
+            if not client.get('profile_saved'):
+                raise ValueError('Verifica si salveaza fisa clientului inainte de emiterea contractului.')
+            terms=canonical_terms(client,work,terms)
             # Validate before allocating the number, then render inside the same transaction.
             contract.prepare_context(client,work,values,dict(terms,nr_contract='VALIDARE'))
             year=date.today().year;cur=conn.cursor()
