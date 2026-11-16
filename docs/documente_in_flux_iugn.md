@@ -32,3 +32,18 @@ Migrarea este aditiva, la pornirea aplicatiei, pentru SQLite si PostgreSQL.
 Etapele deja confirmate si documentele emise anterior sunt pastrate.
 Backupul PostgreSQL acopera metadatele; fisierele din UPLOAD_DIR trebuie
 incluse in continuare in backupul documentelor externe.
+
+## Afisarea compacta
+
+Etapele sunt grupate in patru sectiuni pliabile, cu numarul etapelor finalizate
+si al documentelor. Sectiunea cu primul pas disponibil este deschisa implicit.
+Bara de progres si pasii disponibili sunt vizibili deasupra fluxului. Filtrele
+Toate, De facut, Cu documente si Finalizate reduc lista fara a modifica datele.
+
+Originalele contractului si mandatului au descarcare directa pe randul emiterii.
+Randul semnaturilor are doua actiuni distincte, Contract si Mandat, care aleg
+automat tipul documentului. Indicatorii arata ce exemplar semnat este incarcat.
+Fisierele existente si incarcarea sunt accesibile in acelasi panou. Schimbarea
+tipului de document foloseste un formular separat pentru a nu reutiliza un
+fisier ales pentru alt tip. Confirmarile manuale si reprogramarile sunt grupate
+intr-o sectiune pliabila separata; regulile si drepturile raman aceleasi.
