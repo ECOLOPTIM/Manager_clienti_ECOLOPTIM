@@ -25,7 +25,7 @@ def render_editor(client_id=None):
     st.caption('Identitate, contact si domiciliu / sediu. Adresa locului de consum se completeaza separat in fiecare lucrare.')
     if inherited and not row.get('profile_saved'):
         st.info('Am recuperat date din documentele acestui client. Verifica-le si salveaza fisa; contractele emise raman nemodificate.')
-    kind=st.selectbox('Tip client',['PF','PJ'],index=1 if row.get('beneficiar_tip')=='PJ' or row.get('firma') else 0,key=key+'_kind')
+    kind=st.selectbox('Tip client',['PF','PJ'],index=1 if (row.get('beneficiar_tip')=='PJ' if row.get('beneficiar_tip') else bool(row.get('firma'))) else 0,key=key+'_kind')
     values={'beneficiar_tip':kind,'profile_saved':1}
     with st.form(key+'_form'):
         def fields(items):

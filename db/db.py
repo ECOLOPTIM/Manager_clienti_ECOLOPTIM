@@ -148,11 +148,15 @@ def _migrate_client_work_fields(conn):
         'lucrari': {'adresa_scara':'TEXT','adresa_etaj':'TEXT','adresa_cod_postal':'TEXT'},
     }
     for table,fields in columns.items():
+        if DATABASE_URL:
+            rows=conn.execute('SELECT column_name FROM information_schema.columns '
+                              'WHERE table_schema=%s AND table_name=%s',(DATABASE_SCHEMA,table)).fetchall()
+            existing={r[0] for r in rows}
+        else:
+            existing=_table_columns(conn,table)
         for name,kind in fields.items():
-            if DATABASE_URL:
-                conn.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {kind}')
-            else:
-                _add_column_if_missing(conn,table,name,kind)
+            if name not in existing:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {kind}')
 
 
 def _migrate_schema(conn: sqlite3.Connection):
