@@ -69,6 +69,30 @@ class ContractIUGNTests(unittest.TestCase):
         self.assertNotIn('CNP',text)
         self.assertNotIn('beneficiar_cnp',prepare_context(*args))
 
+    def test_offer_supplies_estimate_as_a_pair_and_preserves_separate_estimates(self):
+        args=list(fixture())
+        args[3].update(nr_oferta='OF-42',data_oferta='2026-10-29',nr_deviz='',data_deviz='')
+        context=prepare_context(*args)
+        self.assertEqual(context['nr_deviz'],'OF-42')
+        self.assertEqual(context['data_deviz'],'29.10.2026')
+        template=Document(ic.TEMPLATE)
+        template.add_paragraph('Devizul tehnico-economic nr. {{ nr_deviz }} / {{ data_deviz }} este anexat.')
+        template.add_paragraph('Contractul este insotit de devizul tehnico-economic.')
+        template.save(ic.TEMPLATE)
+        text='\n'.join(p.text for p in Document(BytesIO(generate_contract(*args))).paragraphs)
+        self.assertIn('Oferta/devizul tehnico-economic nr. OF-42 / 29.10.2026',text)
+        self.assertIn('insotit de oferta/devizul tehnico-economic',text)
+        args[3].update(nr_deviz='DEV-9',data_deviz='2026-10-30')
+        context=prepare_context(*args)
+        self.assertEqual(context['nr_deviz'],'DEV-9')
+        self.assertEqual(context['data_deviz'],'30.10.2026')
+        args[3]['data_deviz']=''
+        with self.assertRaisesRegex(ContractDataError,'data_deviz'):
+            prepare_context(*args)
+        args[3].update(nr_deviz='',data_deviz='',data_oferta='')
+        with self.assertRaisesRegex(ContractDataError,'data_oferta'):
+            prepare_context(*args)
+
     def test_common_texts_have_defaults(self):
         args=list(fixture())
         for field in ('descriere_lucrare','defalcare_avize','documente_detectoare_beneficiar'):

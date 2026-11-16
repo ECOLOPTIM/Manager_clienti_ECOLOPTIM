@@ -85,7 +85,7 @@ def preview(bundle,terms):
     for name in ('gdpr_pastrare_acte','gdpr_pastrare_contabil','gdpr_pastrare_contract','gdpr_pastrare_tehnic','gdpr_transferuri'):
         if not str(firm.get(name) or '').strip():
             firm[name]='NECONFIGURAT - numai pentru previzualizare'
-    draft=dict(terms,nr_contract='PREVIZUALIZARE')
+    draft=contract.offer_as_estimate(dict(terms,nr_contract='PREVIZUALIZARE'))
     if not str(draft.get('nr_deviz') or '').strip():draft['nr_deviz']='NECOMPLETAT'
     if not draft.get('data_deviz'):draft['data_deviz']=draft.get('data_contract') or date.today().isoformat()
     return contract.generate_contract(bundle['client'],bundle['work'],firm,draft)

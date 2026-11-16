@@ -48,11 +48,12 @@ def contract_template():
         containers.extend((section.header,section.footer))
     for container in containers:
         for paragraph in paragraphs(container):
-            if 'beneficiar_cnp' not in paragraph.text:
+            if 'beneficiar_cnp' not in paragraph.text and 'devizul tehnico-economic' not in paragraph.text.lower():
                 continue
             text=re.sub(r',\s*CNP\s*\{\{\s*beneficiar_cnp\s*\}\}', '', paragraph.text,flags=re.I)
             text=re.sub(r'\bCNP\s*:?\s*\{\{\s*beneficiar_cnp\s*\}\}', '', text,flags=re.I)
             text=re.sub(r'\{\{\s*beneficiar_cnp\s*\}\}', '', text)
+            text=re.sub(r'(?<!/)\b[Dd]evizul tehnico-economic', lambda m: 'Oferta/devizul tehnico-economic' if m.group()[0].isupper() else 'oferta/devizul tehnico-economic', text)
             formatting=deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
             paragraph.text=text
             if formatting is not None and paragraph.runs:
@@ -96,6 +97,19 @@ def _date(value, field):
     raise ContractDataError(f'Data invalida: {field}')
 
 
+def offer_as_estimate(terms):
+    """An absent separate estimate uses the accepted offer as one document pair.
+
+    Preserve supplied separate estimates, including incomplete ones for validation.
+    Never combine a separate number with the date of another document.
+    """
+    result=dict(terms)
+    if not any(str(result.get(k) or '').strip() for k in ('nr_deviz','data_deviz')):
+        result['nr_deviz']=result.get('nr_oferta') or ''
+        result['data_deviz']=result.get('data_oferta') or ''
+    return result
+
+
 def prepare_context(client, work, company, terms):
     """Map records, validate PF/PJ and amounts; return a complete flat DOCX context.
 
@@ -108,7 +122,7 @@ def prepare_context(client, work, company, terms):
         raise ContractDataError('Lucrarea nu apartine clientului selectat.')
     names = template_variables()
     # Ignore a legacy draft's CNP without exporting or storing a new copy.
-    terms={name:value for name,value in terms.items() if name!='beneficiar_cnp'}
+    terms=offer_as_estimate({name:value for name,value in terms.items() if name!='beneficiar_cnp'})
     ctx = {name: '' for name in names}
     ctx.update({name: client.get(source) or '' for name, source in CLIENT_FIELDS.items()})
     ctx.update({name: work.get(source) or '' for name, source in WORK_FIELDS.items()})

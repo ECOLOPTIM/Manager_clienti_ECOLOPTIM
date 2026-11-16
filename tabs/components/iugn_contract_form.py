@@ -83,7 +83,11 @@ def render(lid):
                'Datele obligatorii se verifica integral inainte de emitere.')
     kind=st.selectbox('Tip beneficiar',['PF','PJ'],index=1 if defaults.get('beneficiar_tip')=='PJ' else 0,key=key+'_kind')
     correspondence=st.checkbox('Adresa de corespondenta diferita',value=bool(defaults.get('corespondenta_diferita')),key=key+'_correspondence')
-    values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence}
+    separate_default=any(str(defaults.get(n) or '').strip() for n in ('nr_deviz','data_deviz'))
+    separate=st.checkbox('Exista un deviz separat de oferta',value=separate_default,key=key+'_separate_estimate')
+    if not separate:
+        st.caption('Oferta acceptata tine loc de deviz. Numarul si data ei se preiau automat in contract.')
+    values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence,'nr_deviz':'','data_deviz':''}
     with st.form(key+f"_form_{bundle['draft_revision']}"):
         for group,names in [
             ('Beneficiar', ['beneficiar_nume']+(['beneficiar_firma','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate'] if kind=='PJ'
@@ -92,7 +96,7 @@ def render(lid):
             ('Domiciliul sau sediul beneficiarului',['beneficiar_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa lucrarii',['adresa_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa de corespondenta',['corespondenta_'+p for p in contract.ADDRESS_PARTS] if correspondence else []),
-            ('Contract oferta si deviz',['data_contract','nr_oferta','data_oferta','nr_deviz','data_deviz','durata_contract_zile','descriere_lucrare','documente_detectoare_beneficiar']),
+            ('Contract oferta si deviz',['data_contract','nr_oferta','data_oferta']+(['nr_deviz','data_deviz'] if separate else [])+['durata_contract_zile','descriere_lucrare','documente_detectoare_beneficiar']),
             ('Pret si transe',[*contract.MONEY_INPUTS,'defalcare_avize','avans_procent']),
         ]:
             if not names:continue
@@ -126,7 +130,8 @@ def render(lid):
         except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))
     approved=st.session_state.get(key+'_preview')
     if approved and (approved['terms']['beneficiar_tip']!=kind or
-                     approved['terms']['corespondenta_diferita']!=correspondence):
+                     approved['terms']['corespondenta_diferita']!=correspondence or
+                     any(bool(str(approved['terms'].get(n) or '').strip()) for n in ('nr_deviz','data_deviz'))!=separate):
         st.session_state.pop(key+'_preview',None)
         approved=None
     if approved:

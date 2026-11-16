@@ -26,11 +26,26 @@ class ContractIssueCases:
         text='\n'.join(p.text for p in Document(BytesIO(data)).paragraphs)
         self.assertIn('NECONFIGURAT - numai pentru previzualizare',text)
         self.assertIn('PREVIZUALIZARE',text)
-        self.assertIn('NECOMPLETAT',text)
+        self.assertNotIn('NECOMPLETAT',text)
+        self.assertIn(terms['nr_oferta'],text)
         self.assertEqual(company.get()['values']['gdpr_pastrare_acte'],'')
         self.assertEqual(terms['nr_deviz'],'')
         self.assertIsNone(docs.open_form(lid)['issued'])
         with self.assertRaises(ValueError):docs.issue(lid,bundle,terms)
+
+    def test_offer_is_used_for_preview_and_final_issue_without_separate_estimate(self):
+        lid,bundle,terms=self.setup_contract()
+        terms=dict(terms,nr_oferta='OF-42',data_oferta='2026-10-29',nr_deviz='',data_deviz='')
+        docs.save_draft(lid,terms,expected_revision=bundle['draft_revision'])
+        bundle=docs.open_form(lid)
+        self.assertEqual(bundle['terms']['nr_deviz'],'')
+        docs.preview(bundle,terms)
+        docs.issue(lid,bundle,terms)
+        import json
+        snapshot=json.loads(docs.open_form(lid)['issued']['snapshot'])
+        self.assertEqual(snapshot['context']['nr_deviz'],'OF-42')
+        self.assertEqual(snapshot['context']['data_deviz'],'29.10.2026')
+        self.assertIn('contract_emis',iugn.get(lid)['state']['facts'])
 
     def test_cnp_is_not_copied_from_client_or_legacy_draft_into_contract_snapshot(self):
         lid,bundle,terms=self.setup_contract()
