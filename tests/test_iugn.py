@@ -108,7 +108,12 @@ class IUGNChecks:
         self.assign()
         self.event('cerere_depusa')
         self.assertEqual(len(rules.outstanding_exceptions(iugn.get(self.lid)['state'])), 2)
+        # These milestones were seeded offline, without issued originals. Keep
+        # this role/exception test on that maintenance path; browser signatures
+        # and their required evidence are exercised by StepDocumentCases.
+        permissions.clear_actor()
         self.event('contract_semnat')
+        self.bind('admin')
         self.event('avans_confirmat')
         self.assertEqual(rules.outstanding_exceptions(iugn.get(self.lid)['state']), [])
 

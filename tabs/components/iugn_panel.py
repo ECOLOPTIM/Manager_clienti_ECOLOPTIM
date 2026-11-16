@@ -134,8 +134,11 @@ def render(lucrare_id, client_id):
                     st.session_state.pop(f'iugn_contract_bundle_{lucrare_id}', None)
                     st.session_state.pop(f'iugn_contract_bundle_{lucrare_id}_preview', None)
                     st.rerun()
-    available = [key for key in rules.EVENT_LABELS
-                 if key != 'contract_emis' and not rules.blocked_reason(state, key) and iugn.can_record(state, key)]
+    try:
+        available = [key for key in rules.EVENT_LABELS
+                     if key != 'contract_emis' and not rules.blocked_reason(state, key) and iugn.can_record(state, key)]
+    except PermissionError:
+        available = []
     if available:
         st.markdown('**Inregistreaza un eveniment**')
         key = st.selectbox('Eveniment', available, format_func=rules.EVENT_LABELS.get,

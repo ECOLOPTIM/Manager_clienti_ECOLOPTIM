@@ -122,6 +122,7 @@ class StepDocumentCases:
 
     def test_manual_browser_confirmation_requires_signed_contract_evidence(self):
         lid=self.prepared_step_work()
+        db.seteaza_must_change_password('admin',0)
         permissions.bind_actor('admin',permissions.password_marker(db.get_utilizator('admin')))
         with self.assertRaisesRegex(ValueError,'Incarca exemplarul semnat'):
             iugn.record_event(lid,'contract_semnat',date.today().isoformat(),expected_revision=iugn.get(lid)['revision'])

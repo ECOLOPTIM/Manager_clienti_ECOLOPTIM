@@ -72,3 +72,11 @@ class StepDocumentsUI(unittest.TestCase):
         self.assertTrue(next(b for b in app.button if b.key==prefix+'_up_contract_semnat').disabled)
         next(b for b in app.button if b.label=='Reincarca fluxul').click().run()
         self.assertFalse(next(b for b in app.button if b.key==prefix+'_up_contract_semnat').disabled)
+
+    def test_viewer_can_download_but_upload_controls_are_disabled(self):
+        lid=self.prepared_step_work()
+        db.adauga_utilizator('document_viewer','Temporary-password-123','vizualizare',must_change_password=0)
+        app=self.open(lid,'document_viewer');prefix=f'iugn_1_{lid}'
+        self.assertTrue(next(b for b in app.button if b.key==prefix+'_up_contract_semnat').disabled)
+        next(b for b in app.button if b.key==prefix+'_down_contract_emis').click().run()
+        self.assertFalse(app.exception);self.assertEqual(len(app.get('download_button')),2)
