@@ -60,11 +60,9 @@ def _upload(lid,step,state,revision,items,prefix,cache):
                 reference=reference,note=note,scheduled_for=str(scheduled),team=team)
         except (ValueError,PermissionError,OSError) as exc:st.error(str(exc))
         else:
-            st.session_state[prefix+'_message']='Documente salvate. '+('Etapa a fost confirmata.' if result['confirmed'] else 'Starea etapei este pastrata.')
+            st.session_state[cache+'_notice']='Documente salvate. '+('Etapa a fost confirmata.' if result['confirmed'] else 'Starea etapei este pastrata.')
             st.session_state.pop(cache,None)
             st.rerun()
-    if st.session_state.get(prefix+'_message'):
-        st.success(st.session_state.pop(prefix+'_message'))
 
 
 FILTERS=('Toate', 'De facut', 'Cu documente', 'Finalizate')
@@ -152,6 +150,8 @@ def _row(lid,row,state,revision,live_revision,items,prefix,cache,active):
 def render(lid,state,revision,live_revision,prefix,cache):
     items=documents.list_for_work(lid)
     active=st.session_state.get(prefix+'_doc_panel')
+    if st.session_state.get(cache+'_notice'):
+        st.success(st.session_state.pop(cache+'_notice'))
     total=len(rules.STEPS);done=sum(row[0] in state['facts'] for row in rules.STEPS)
     st.progress(done/total,text=f'{done} din {total} etape finalizate')
     ready=[label for step,label,*_ in rules.STEPS if not rules.blocked_reason(state,step)]

@@ -98,3 +98,14 @@ class StepDocumentsUI(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertFalse(app.get('download_button'))
         self.assertTrue(any(b.key.endswith('_up_contract_semnat_mandat_semnat') for b in app.button))
+
+    def test_success_remains_visible_when_completed_row_leaves_pending_filter(self):
+        lid=self.prepared_step_work();app=self.open(lid);prefix=f'iugn_1_{lid}'
+        next(x for x in app.radio if x.label=='Afiseaza etapele').set_value('De facut').run()
+        next(b for b in app.button if b.key==prefix+'_up_contract_semnat_contract_semnat').click().run()
+        with patch('streamlit.file_uploader',return_value=[Uploaded()]):
+            next(b for b in app.button if b.label=='Salveaza documentele').click().run()
+        self.assertFalse(app.exception);self.assertFalse(app.error)
+        self.assertTrue(any('Etapa a fost confirmata' in x.value for x in app.success))
+        self.assertNotIn(prefix+'_up_contract_semnat_contract_semnat',[b.key for b in app.button])
+        self.assertIn('contract_semnat',iugn.get(lid)['state']['facts'])
