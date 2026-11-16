@@ -18,6 +18,7 @@ class ContractFormUI(unittest.TestCase):
     setUp=cases.ContractIssueSQLite.setUp
     tearDown=cases.ContractIssueSQLite.tearDown
     setup_contract=cases.ContractIssueCases.setup_contract
+    new_contract_work=cases.ContractIssueCases.new_contract_work
     # Reuse persistence setup while adding a complete browser form scenario.
     def test_single_deviz_offer_fields_preview_and_issue(self):
         lid,bundle,terms=self.setup_contract()
@@ -52,6 +53,18 @@ class ContractFormUI(unittest.TestCase):
         next(b for b in app.button if b.label=='Verifica si previzualizeaza').click().run()
         self.assertTrue(app.error)
         self.assertFalse(any(b.label=='Emite si salveaza contractul in dosar' for b in app.button))
+
+    def test_new_work_form_prefills_prior_beneficiary_without_copying_price(self):
+        lid,bundle,terms=self.setup_contract()
+        docs.issue(lid,bundle,terms)
+        new_lid=self.new_contract_work()
+        app=AppTest.from_string(APP,default_timeout=15);app.session_state['test_lid']=new_lid
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertEqual(next(x for x in app.text_input if x.label=='Numar CI').value,'012345')
+        self.assertEqual(next(x for x in app.text_input if x.label=='Numar deviz-oferta').value,'')
+        self.assertEqual(next(x for x in app.number_input if x.label=='Proiectare cu TVA').value,0)
+        self.assertEqual(next(x for x in app.text_input if x.label=='Nume beneficiar / reprezentant').value,docs.open_form(new_lid)['client']['nume'])
 
     def test_browser_preview_then_issue_and_reopen(self):
         lid,bundle,terms=self.setup_contract()

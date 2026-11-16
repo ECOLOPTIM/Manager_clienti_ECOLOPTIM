@@ -73,7 +73,9 @@ def render(lid):
                                 'autorizatie_executie_numar','autorizatie_executie_expirare'}]
     if missing:st.warning('Completeaza Date generale: '+', '.join(missing))
     st.caption('Numarul se aloca numai la emitere. Sumele sunt cu TVA; taxele Distrigaz sunt separate.')
-    defaults={n:bundle['client'].get(src) or '' for n,src in contract.CLIENT_FIELDS.items()}
+    defaults=dict(bundle['beneficiary_defaults'])
+    if bundle['beneficiary_inherited']:
+        st.caption('Datele beneficiarului lipsa din fisa clientului au fost preluate din documentele anterioare ale aceluiasi client. Verifica daca mai sunt actuale.')
     defaults.update({n:bundle['work'].get(src) or '' for n,src in contract.WORK_FIELDS.items()})
     defaults.update(contract.offer_as_estimate(bundle['terms']))
     legacy=bundle['terms']

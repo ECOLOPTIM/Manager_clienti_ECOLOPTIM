@@ -43,13 +43,65 @@ def _records(conn,lid,lock=False):
     return client,work
 
 
+# Reuse identity/contact only; work address, prices, signatures and document numbers
+# always belong to their own work and must never cross this boundary.
+BENEFICIARY_FIELDS = set(contract.CLIENT_FIELDS) | {
+    'beneficiar_tip','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate',
+    'beneficiar_banca','beneficiar_iban'}
+
+
+def _beneficiary_defaults(conn,client,lid):
+    cur=conn.cursor()
+    db._execute(cur,"""SELECT d.payload AS content,d.updated_at AS saved_at,'draft' AS source_kind
+        FROM iugn_contract_drafts d JOIN lucrari l ON l.id=d.lucrare_id
+        WHERE l.client_id=? AND l.id<>?
+        UNION ALL
+        SELECT i.snapshot AS content,i.issued_at AS saved_at,'issued' AS source_kind
+        FROM iugn_contract_issues i JOIN lucrari l ON l.id=i.lucrare_id
+        WHERE l.client_id=? AND l.id<>?
+        ORDER BY saved_at DESC LIMIT 20""",(client['id'],lid,client['id'],lid))
+    fallback={}
+    for content,_,kind in cur.fetchall():
+        saved=json.loads(content)
+        values=saved['context'] if kind=='issued' else saved
+        fallback={k:v for k,v in values.items() if k in BENEFICIARY_FIELDS and str(v or '').strip()}
+        if fallback:break
+    inherited=bool(fallback)
+    # A partially updated address or identity document is one coherent group:
+    # never complete a new CI number with an old CI series/date, or a new address
+    # with pieces of a previous address.
+    for group in (
+        {'beneficiar_'+p for p in contract.ADDRESS_PARTS},
+        {'beneficiar_ci_serie','beneficiar_ci_nr','beneficiar_ci_emitent','beneficiar_ci_data'},
+    ):
+        def normalized(k,v):
+            text=str(v or '').strip()
+            if k=='beneficiar_ci_data' and text:
+                try:return contract.deadlines.as_date(text).isoformat()
+                except ValueError:pass
+            return text.casefold()
+        changed=any(normalized(k,client.get(contract.CLIENT_FIELDS[k])) and
+                    normalized(k,client.get(contract.CLIENT_FIELDS[k]))!=normalized(k,fallback.get(k))
+                    for k in group if k in contract.CLIENT_FIELDS)
+        if changed:
+            for k in group:fallback.pop(k,None)
+    current_firm=str(client.get('firma') or '').strip()
+    if current_firm and fallback.get('beneficiar_firma') and current_firm!=fallback['beneficiar_firma']:
+        for k in ('beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate'):
+            fallback.pop(k,None)
+    fallback.update({k:client[src] for k,src in contract.CLIENT_FIELDS.items() if str(client.get(src) or '').strip()})
+    return fallback,inherited
+
+
 def open_form(lid):
     permissions.require('write')
     with closing(db._connect()) as conn:
         client,work=_records(conn,int(lid))
         draft=_row(conn,'SELECT * FROM iugn_contract_drafts WHERE lucrare_id=?',(lid,))
         issued=_row(conn,'SELECT * FROM iugn_contract_issues WHERE lucrare_id=?',(lid,))
+        beneficiary_defaults,inherited=_beneficiary_defaults(conn,client,int(lid))
     return {'client':client,'work':work,'company':company.get(),
+            'beneficiary_defaults':beneficiary_defaults,'beneficiary_inherited':inherited,
             'draft_revision':draft['revision'] if draft else 0,
             'terms':{k:v for k,v in json.loads(draft['payload']).items() if k!='beneficiar_cnp'} if draft else {},'issued':issued,
             'template_hash':hashlib.sha256(contract.TEMPLATE.read_bytes()).hexdigest()}

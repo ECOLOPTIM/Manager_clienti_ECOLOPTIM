@@ -56,6 +56,53 @@ class ContractIssueCases:
         self.assertEqual(iugn.get(lid),before)
         self.assertTrue(db.lista_atasamente(1,lucrare_id=lid).empty)
 
+    def new_contract_work(self,client_id=1):
+        db.adauga_lucrare({'client_id':client_id,'tip_lucrare':'Instalatie de utilizare noua',
+                          'valoare_contractata':3100,'descriere':'Lucrare noua'})
+        return int(db.lista_lucrari_client(client_id)['id'].max())
+
+    def test_new_work_reuses_identity_from_issued_contract_without_other_work_data(self):
+        lid,bundle,terms=self.setup_contract()
+        docs.issue(lid,bundle,terms)
+        with closing(db._connect()) as conn,conn:
+            db._execute(conn.cursor(),'UPDATE clienti SET ci_numar=? WHERE id=1',('012345',))
+        new_lid=self.new_contract_work()
+        new=docs.open_form(new_lid)
+        values=new['beneficiary_defaults']
+        self.assertEqual(values['beneficiar_ci_nr'],'012345')
+        self.assertEqual(values['beneficiar_ci_serie'],terms['beneficiar_ci_serie'])
+        self.assertEqual(values['beneficiar_judet'],terms['beneficiar_judet'])
+        self.assertTrue(new['beneficiary_inherited'])
+        self.assertEqual(new['terms'],{})
+        for key in ('beneficiar_cnp','nr_contract','nr_oferta','data_contract','valoare_proiectare','adresa_strada','corespondenta_strada'):
+            self.assertNotIn(key,values)
+        self.assertIsNone(new['issued'])
+        self.assertNotIn('contract_emis',iugn.get(new_lid)['state']['facts'])
+
+    def test_saved_identity_does_not_cross_clients_and_current_profile_wins(self):
+        lid,bundle,terms=self.setup_contract()
+        db.adauga_client({'nume':'Alt client'})
+        other_id=int(db.lista_clienti().query("nume == 'Alt client'").iloc[0]['id'])
+        other=docs.open_form(self.new_contract_work(other_id))
+        self.assertFalse(other['beneficiary_inherited'])
+        self.assertNotIn('beneficiar_ci_nr',other['beneficiary_defaults'])
+        with closing(db._connect()) as conn,conn:
+            db._execute(conn.cursor(),'UPDATE clienti SET ci_numar=?,telefon=? WHERE id=1',('999999','0700000000'))
+        new=docs.open_form(self.new_contract_work())
+        self.assertEqual(new['beneficiary_defaults']['beneficiar_ci_nr'],'999999')
+        self.assertEqual(new['beneficiary_defaults']['client_telefon'],'0700000000')
+        self.assertNotIn('beneficiar_ci_serie',new['beneficiary_defaults'])
+        self.assertEqual(new['beneficiary_defaults']['beneficiar_nume'],new['client']['nume'])
+
+    def test_current_draft_is_not_replaced_by_beneficiary_prefill(self):
+        lid,bundle,terms=self.setup_contract()
+        new_lid=self.new_contract_work()
+        own=dict(terms,beneficiar_ci_nr='444444',beneficiar_strada='')
+        docs.save_draft(new_lid,own,expected_revision=0)
+        new=docs.open_form(new_lid)
+        self.assertEqual(new['terms']['beneficiar_ci_nr'],'444444')
+        self.assertEqual(new['terms']['beneficiar_strada'],'')
+
     def test_cnp_is_not_copied_from_client_or_legacy_draft_into_contract_snapshot(self):
         lid,bundle,terms=self.setup_contract()
         with closing(db._connect()) as conn,conn:
