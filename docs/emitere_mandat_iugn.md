@@ -9,3 +9,12 @@ Pentru contractele emise inaintea acestei functionalitati: Documente IUGN / Cont
 Fiecare mandat pastreaza contextul, referinta si amprenta contractului, amprenta sablonului, autorul si amprenta fisierului. Se permite un singur mandat emis per lucrare. Drepturile se verifica din nou la salvare. Documentele emise raman nemodificate si se descarca din dosar dupa verificarea amprentei.
 
 Emiterea nu confirma semnatura contractului sau a mandatului si nu confirma depunerea in portal. Incarcarea exemplarelor semnate ramane un pas separat. Documentele necesita backupul UPLOAD_DIR impreuna cu baza de date. Migrarile sunt aditive pentru SQLite si PostgreSQL; testele folosesc un sablon sintetic, fara antetul privat.
+
+Identificarea completa a partilor poate fi asezata direct in sablon, cu ramura
+PF/PJ pentru beneficiar. Contextul mandatului include campurile de identitate,
+adresele `beneficiar_adresa` si `executant_adresa`, conturile si bancile, precum
+si reprezentantii si functiile acestora. Datele provin din contextul inghetat la
+emiterea contractului, fara o noua introducere in formular. Campurile agregate
+`mandant_identificare` si `mandatar_identificare` raman compatibile cu sabloanele
+anterioare. CNP-ul nu este transmis. Sablonul privat se inlocuieste separat;
+actualizarea codului prin Git nu instaleaza documentul Word.

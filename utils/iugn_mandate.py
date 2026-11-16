@@ -26,7 +26,17 @@ def context(source,number,issued_date=None):
     agent=(f"{source['executant_denumire']}, CUI {source['executant_cui']}, nr. Registrul Comertului "
            f"{source['executant_regcom']}, cu sediul in {address(source,'executant_')}, "
            f"reprezentata de {source['executant_reprezentant']}, in calitate de {source['executant_reprezentant_calitate']}")
-    return {'nr_mandat':number,'data_mandat':(issued_date or date.today()).strftime('%d.%m.%Y'),
+    identity_fields = {key: source.get(key, '') for key in (
+        'beneficiar_tip', 'beneficiar_firma', 'beneficiar_nume', 'beneficiar_regcom',
+        'beneficiar_cui', 'beneficiar_iban', 'beneficiar_banca',
+        'beneficiar_reprezentant_calitate', 'beneficiar_ci_serie', 'beneficiar_ci_nr',
+        'beneficiar_ci_emitent', 'beneficiar_ci_data', 'executant_denumire',
+        'executant_regcom', 'executant_cui', 'executant_iban', 'executant_banca',
+        'executant_reprezentant', 'executant_reprezentant_calitate',
+    )}
+    identity_fields.update(beneficiar_adresa=address(source, 'beneficiar_'),
+                           executant_adresa=address(source, 'executant_'))
+    return {**identity_fields, 'nr_mandat':number,'data_mandat':(issued_date or date.today()).strftime('%d.%m.%Y'),
             'mandant_identificare':principal,'mandatar_identificare':agent,
             'adresa_lucrare':address(source,'adresa_'),'nr_contract':source['nr_contract'],
             'data_contract':source['data_contract'],'executant_telefon':source['executant_telefon'],
