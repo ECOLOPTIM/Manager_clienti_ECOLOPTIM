@@ -1,3 +1,4 @@
+from contextlib import closing
 from datetime import date, timedelta
 from pathlib import Path
 import tempfile
@@ -17,7 +18,7 @@ class CompanyCases:
         after=company.get()
         self.assertEqual(after['revision'],rev)
         self.assertEqual(after['values'],values)
-        with db._connect() as conn:
+        with closing(db._connect()) as conn:
             row=db._execute(conn.cursor(),'SELECT payload FROM firma_config_istoric WHERE revision=?',(rev,)).fetchone()
         self.assertIsNotNone(row)
 

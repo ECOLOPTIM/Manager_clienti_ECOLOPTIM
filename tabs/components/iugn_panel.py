@@ -11,17 +11,21 @@ def render_work_details(row, client_id, edit_key, snapshot_key, conflict_key):
     lid = int(row['id'])
     st.info('Rolurile, etapele si programarile se modifica din Flux birou. '
             'Aici poti actualiza adresa, descrierea si observatiile.')
+    from tabs.components import work_address
+    client=db.lista_clienti().query('id == @client_id').iloc[0]
+    address_key=f'iugn_address_{client_id}_{lid}'
+    work_address.copy_control(client,address_key)
     with st.form(f'iugn_details_{client_id}_{lid}'):
         values = dict(row)
-        for field, label in [('adresa_judet', 'Judet'), ('adresa_localitate', 'Localitate'),
-                             ('adresa_strada', 'Strada'), ('adresa_numar', 'Numar'),
-                             ('adresa_bloc', 'Bloc'), ('adresa_apartament', 'Apartament')]:
-            values[field] = st.text_input(label, value=str(row.get(field) or ''))
-        values['descriere'] = st.text_area('Descriere lucrare', value=str(row.get('descriere') or ''))
-        values['observatii'] = st.text_area('Observatii', value=str(row.get('observatii') or ''))
+        values.update(work_address.fields(row,address_key))
+        cols=st.columns(2)
+        values['descriere'] = cols[0].text_area('Descriere lucrare', value=str(row.get('descriere') or ''))
+        values['observatii'] = cols[1].text_area('Observatii', value=str(row.get('observatii') or ''))
         save = st.form_submit_button('Salveaza detaliile lucrarii')
         cancel = st.form_submit_button('Inchide editarea')
     if cancel:
+        for state_key in list(st.session_state):
+            if state_key.startswith(address_key):st.session_state.pop(state_key,None)
         for key in (edit_key, snapshot_key, conflict_key):
             st.session_state.pop(key, None)
         st.rerun()
@@ -37,6 +41,8 @@ def render_work_details(row, client_id, edit_key, snapshot_key, conflict_key):
         except (ValueError, PermissionError) as exc:
             st.error(str(exc))
         else:
+            for state_key in list(st.session_state):
+                if state_key.startswith(address_key):st.session_state.pop(state_key,None)
             for key in (edit_key, snapshot_key, conflict_key):
                 st.session_state.pop(key, None)
             st.rerun()
@@ -73,9 +79,20 @@ def render(lucrare_id, client_id):
         st.rerun()
     for col, (stream, label) in zip(st.columns(4), rules.stream_states(state).items()):
         col.metric(stream, label)
-    st.markdown('**Persoane desemnate**')
-    for role, label in rules.ROLES.items():
-        st.write(f"{label}: {state['roles'][role] or 'Nedesemnat'}")
+    from db import iugn_documents
+    deadlines=iugn_documents.contract_deadlines(lucrare_id,live['state'])
+    if deadlines:
+        late=any(row['Stare']=='Depasit' or row['Depaseste durata contractului'] for row in deadlines)
+        with st.expander('Termenele contractului',expanded=late):
+            st.dataframe(pd.DataFrame(deadlines),hide_index=True,width='stretch')
+            if late:
+                st.warning('Exista un termen depasit sau o etapa programata dupa durata contractului. Verifica lucrarea si necesitatea unui act aditional; termenul nu se prelungeste automat.')
+            st.caption('Calcul orientativ: luni-vineri, fara sarbatorile nationale si cele mobile ortodoxe. Verifica alte zile nelucratoare aplicabile. Receptia tehnica se urmareste din documente; nu este confirmata automat.')
+    elif iugn.has_contract_document(lucrare_id):
+        st.caption('Termenele efective se calculeaza dupa confirmarea contractului semnat.')
+    for col,(role,label) in zip(st.columns(3),rules.ROLES.items()):
+        col.caption(label)
+        col.write(state['roles'][role] or 'Nedesemnat')
     for label in rules.outstanding_exceptions(state):
         st.warning(label + ' — restanta ramane deschisa.')
     if iugn.is_manager() and rules.contract_ready(state):
@@ -98,51 +115,67 @@ def render(lucrare_id, client_id):
                 else:
                     st.session_state.pop(cache, None)
                     st.rerun()
-    rows = []
-    for key, label, stream, role, _ in rules.STEPS:
-        done = key in state['facts']
-        problem = rules.blocked_reason(state, key)
-        rows.append({'Etapa': stream.capitalize(), 'Sarcina': label,
-                     'Stare': 'Finalizat' if done else 'In asteptare' if problem else 'Disponibil',
-                     'Persoana': 'Gelu' if role == 'manager' else state['roles'].get(role, ''),
-                     'Data': state['facts'].get(key, {}).get('date', ''),
-                     'Conditie': '' if done else problem})
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
-    available = [key for key in rules.EVENT_LABELS
-                 if not rules.blocked_reason(state, key) and iugn.can_record(state, key)]
-    if available:
-        st.markdown('**Inregistreaza un eveniment**')
-        key = st.selectbox('Eveniment', available, format_func=rules.EVENT_LABELS.get,
-                           key=prefix+f'_event_{revision}')
-        with st.form(prefix+f'_record_{revision}_{key}'):
-            occurred = st.date_input('Data evenimentului', value=date.today(), max_value=date.today())
-            scheduled = ''
-            team = ''
-            if key in {'executie_programata', 'programare_pif_primita'} | rules.RESCHEDULES.keys():
-                scheduled = st.date_input('Data programata', value=date.today())
-            if key in {'executie_programata', 'echipa_pif_alocata', 'reprogramare_executie'}:
-                team = st.text_input('Echipa alocata')
-            if key == 'reprogramare_pif':
-                st.info('Beneficiarul achita din nou taxa PIF, conform noii note Distrigaz. '
-                        'Nota, echipa si dosarul pentru noua programare vor fi urmarite din nou.')
-            note = st.text_area('Motiv / observatii' if key in rules.EXCEPTIONS | rules.RESCHEDULES else 'Observatii / referinta documentului')
-            save = st.form_submit_button('Inregistreaza evenimentul')
-        if save:
-            try:
-                iugn.record_event(lucrare_id, key, str(occurred), expected_revision=revision,
-                                  note=note, scheduled_for=str(scheduled), team=team)
-            except (ValueError, PermissionError) as exc:
-                st.error(str(exc))
-            else:
-                st.session_state.pop(cache, None)
-                st.rerun()
-    else:
-        st.info('Nu exista evenimente disponibile pentru contul tau in etapa curenta. '
-                'Verifica persoanele desemnate si conditiile din tabel.')
+    from tabs.components.iugn_step_documents import render as render_step_documents
+    render_step_documents(lucrare_id,state,revision,live['revision'],prefix,cache)
+    st.caption('Contract emis se confirma automat din Documente, dupa salvarea contractului. '
+               'Contract semnat este o etapa separata.')
+    if 'contract_emis' in state['facts'] and not iugn.has_contract_document(lucrare_id):
+        st.warning('Contract emis este confirmat manual, dar nu exista un contract emis de aplicatie in dosar.')
+        if iugn.is_manager():
+            with st.form(prefix+f'_contract_correction_{revision}'):
+                correction_reason = st.text_input('Motivul corectiei', key=prefix+f'_correction_reason_{revision}')
+                correction = st.form_submit_button('Anuleaza confirmarea manuala Contract emis')
+            if correction:
+                try:
+                    iugn.correct_unlinked_contract(lucrare_id, expected_revision=revision, reason=correction_reason)
+                except (ValueError, PermissionError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.pop(cache, None)
+                    st.session_state.pop(f'iugn_contract_bundle_{lucrare_id}', None)
+                    st.session_state.pop(f'iugn_contract_bundle_{lucrare_id}_preview', None)
+                    st.rerun()
+    try:
+        available = [key for key in rules.EVENT_LABELS
+                     if key != 'contract_emis' and not rules.blocked_reason(state, key) and iugn.can_record(state, key)]
+    except PermissionError:
+        available = []
+    with st.expander('Alte confirmari si reprogramari'):
+        if available:
+            st.markdown('**Inregistreaza un eveniment**')
+            key = st.selectbox('Eveniment', available, format_func=rules.EVENT_LABELS.get,
+                               key=prefix+f'_event_{revision}')
+            with st.form(prefix+f'_record_{revision}_{key}'):
+                occurred = st.date_input('Data evenimentului', value=date.today(), max_value=date.today())
+                scheduled = ''
+                team = ''
+                if key in {'executie_programata', 'programare_pif_primita'} | rules.RESCHEDULES.keys():
+                    scheduled = st.date_input('Data programata', value=date.today())
+                if key in {'executie_programata', 'echipa_pif_alocata', 'reprogramare_executie'}:
+                    team = st.text_input('Echipa alocata')
+                if key == 'reprogramare_pif':
+                    st.info('Beneficiarul achita din nou taxa PIF, conform noii note Distrigaz. '
+                            'Nota, echipa si dosarul pentru noua programare vor fi urmarite din nou.')
+                note = st.text_area('Motiv / observatii' if key in rules.EXCEPTIONS | rules.RESCHEDULES else 'Observatii / referinta documentului')
+                save = st.form_submit_button('Inregistreaza evenimentul')
+            if save:
+                try:
+                    iugn.record_event(lucrare_id, key, str(occurred), expected_revision=revision,
+                                      note=note, scheduled_for=str(scheduled), team=team)
+                except (ValueError, PermissionError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.pop(cache, None)
+                    st.rerun()
+        elif not rules.blocked_reason(state, 'contract_emis'):
+            st.info('Emite contractul din Documente pentru a continua fluxul.')
+        else:
+            st.info('Nu exista evenimente disponibile pentru contul tau in etapa curenta. '
+                    'Verifica persoanele desemnate si conditiile din tabel.')
     with st.expander('Istoricul lucrarii'):
         events = iugn.history(lucrare_id)
         if not events.empty:
-            events['event_key'] = events['event_key'].map(lambda k: rules.EVENT_LABELS.get(k, k))
+            events['event_key'] = events['event_key'].map(lambda k: rules.EVENT_LABELS.get(k, 'Anulare confirmare manuala Contract emis' if k == 'corectie_contract_emis' else 'Document incarcat' if k == 'document_incarcat' else k))
             events['detail'] = events['detail'].map(lambda d: json.dumps(json.loads(d), ensure_ascii=False))
             st.dataframe(events.rename(columns={'event_key': 'Eveniment', 'occurred_on': 'Data eveniment',
                 'recorded_at': 'Inregistrat la', 'actor': 'Utilizator', 'detail': 'Detalii',
@@ -154,5 +187,4 @@ def render(lucrare_id, client_id):
             st.caption('Nu exista sarcini anterioare.')
         else:
             st.dataframe(old[['tip_sarcina', 'status', 'responsabil', 'observatii']], hide_index=True)
-    st.caption('Prima etapa confirma evenimentele declarate de operator. Generarea si verificarea '
-               'documentelor, termenele automate, transele si inchiderea dosarului urmeaza separat.')
+    st.caption('Documentele sunt arhivate pe etape. Confirmarile actiunilor raman in istoricul lucrarii.')

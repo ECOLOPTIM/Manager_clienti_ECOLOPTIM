@@ -4,12 +4,12 @@ import db.db as db
 from tabs.components.lucrari_client_components import (
     PREFIX,
     render_lucrari_list,
-    render_documente_panel,
     render_flux_birou_panel,
     render_add_lucrare_form,
     render_edit_lucrare_form,
     render_delete_lucrare_panel,
 )
+from tabs.components.iugn_contract_dispatch import render_documente_panel
 
 
 def _ensure_nr_ordin_for_lucrare(lucrare_id: int) -> str:
