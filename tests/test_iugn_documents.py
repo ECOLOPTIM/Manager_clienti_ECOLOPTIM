@@ -154,6 +154,87 @@ class ContractIssueCases:
         self.assertEqual(recovered['beneficiar_ci_nr'],'012345')
         self.assertNotIn('adresa_strada',recovered)
 
+    def test_contract_and_mandate_are_issued_together_from_same_snapshot(self):
+        import json
+        from db import iugn_mandates
+        lid,bundle,terms=self.setup_contract()
+        docs.issue(lid,bundle,terms)
+        service=docs.open_form(lid)['issued'];mandate=iugn_mandates.get(lid)
+        self.assertEqual(mandate['number'],service['number'].replace('CTR-','MDT-',1))
+        ctx=json.loads(mandate['snapshot'])
+        self.assertEqual(ctx['contract_sha256'],service['sha256'])
+        self.assertEqual(ctx['context']['nr_contract'],service['number'])
+        self.assertIn('012345',ctx['context']['mandant_identificare'])
+        self.assertNotIn('CNP',ctx['context']['mandant_identificare'])
+        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),2)
+        self.assertNotIn('contract_semnat',iugn.get(lid)['state']['facts'])
+
+    def old_contract_without_mandate(self):
+        from db import iugn_mandates
+        lid,bundle,terms=self.setup_contract();docs.issue(lid,bundle,terms)
+        mandate=iugn_mandates.get(lid)
+        with closing(db._connect()) as conn,conn:
+            db._execute(conn.cursor(),'DELETE FROM iugn_mandate_issues WHERE lucrare_id=?',(lid,))
+            db._execute(conn.cursor(),'DELETE FROM atasamente WHERE path=?',(mandate['path'],))
+        Path(mandate['path']).unlink()
+        return lid
+
+    def test_add_mandate_to_old_contract_uses_original_identity_and_address(self):
+        import json
+        from db import iugn_mandates
+        lid=self.old_contract_without_mandate()
+        original=docs.open_form(lid)['issued'];flow=iugn.get(lid)
+        db.modifica_client(1,{'ci_numar':'999999','nume':'Alt nume'})
+        work=db.get_lucrare(lid);db.modifica_lucrare(lid,dict(work,adresa_strada='Alta strada'),expected_revision=work['revision'])
+        approved=iugn_mandates.preview(lid)
+        result=iugn_mandates.issue_existing(lid,approved)
+        ctx=json.loads(iugn_mandates.get(lid)['snapshot'])['context']
+        self.assertIn('012345',ctx['mandant_identificare'])
+        self.assertNotIn('Alt nume',ctx['mandant_identificare'])
+        self.assertNotIn('Alta strada',ctx['adresa_lucrare'])
+        self.assertEqual(docs.open_form(lid)['issued'],original)
+        self.assertEqual(iugn.get(lid),flow)
+        with self.assertRaisesRegex(ValueError,'deja emis'):iugn_mandates.issue_existing(lid,approved)
+        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),2)
+
+    def test_mandate_failure_rolls_back_both_documents_and_counter(self):
+        from utils import iugn_mandate
+        lid,bundle,terms=self.setup_contract()
+        with closing(db._connect()) as conn:
+            row=db._execute(conn.cursor(),'SELECT last_ctr FROM contracte_seq WHERE an=?',(date.today().year,)).fetchone()
+        before=row[0] if row else 0
+        with patch.object(iugn_mandate,'generate',side_effect=OSError('mandate generation failed')):
+            with self.assertRaises(OSError):docs.issue(lid,bundle,terms)
+        with closing(db._connect()) as conn:
+            row=db._execute(conn.cursor(),'SELECT last_ctr FROM contracte_seq WHERE an=?',(date.today().year,)).fetchone()
+        self.assertEqual(row[0] if row else 0,before)
+        self.assertIsNone(docs.open_form(lid)['issued'])
+        self.assertTrue(db.lista_atasamente(1,lucrare_id=lid).empty)
+        self.assertFalse(list(Path(db.UPLOAD_DIR).rglob('*.docx')))
+        self.assertNotIn('contract_emis',iugn.get(lid)['state']['facts'])
+
+    def test_changed_mandate_template_rejects_stale_preview(self):
+        from db import iugn_mandates
+        from utils import iugn_mandate
+        from docx import Document
+        lid=self.old_contract_without_mandate()
+        approved=iugn_mandates.preview(lid)
+        d=Document(iugn_mandate.TEMPLATE);d.add_paragraph('Changed');d.save(iugn_mandate.TEMPLATE)
+        with self.assertRaisesRegex(ValueError,'Sablonul'):iugn_mandates.issue_existing(lid,approved)
+        self.assertIsNone(iugn_mandates.get(lid))
+        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),1)
+
+    def test_mandate_issuance_rechecks_write_permission(self):
+        from db import iugn_mandates
+        lid=self.old_contract_without_mandate()
+        approved=iugn_mandates.preview(lid)
+        db.adauga_utilizator('mandate_viewer','Temporary-password-123','vizualizare',must_change_password=0)
+        permissions.bind_actor('mandate_viewer',permissions.password_marker(db.get_utilizator('mandate_viewer')))
+        try:
+            with self.assertRaises(PermissionError):iugn_mandates.issue_existing(lid,approved)
+        finally:permissions.clear_actor()
+        self.assertIsNone(iugn_mandates.get(lid))
+
     def bind_contract_admin(self):
         permissions.clear_actor()
         db.seteaza_must_change_password('admin',0)
@@ -220,6 +301,10 @@ class ContractIssueCases:
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         path=Path(temp.name)
         p=patch.object(ic,'TEMPLATE',make_template(path/'synthetic.docx'));p.start();self.addCleanup(p.stop)
+        from utils import iugn_mandate
+        from docx import Document
+        m=Document();m.add_paragraph('Mandat {{ nr_mandat }} contract {{ nr_contract }} {{ mandant_identificare }} {{ adresa_lucrare }} {{ mandatar_identificare }}');m.save(path/'mandate.docx')
+        p=patch.object(iugn_mandate,'TEMPLATE',path/'mandate.docx');p.start();self.addCleanup(p.stop)
         p=patch.object(db,'UPLOAD_DIR',str(path/'uploads'));p.start();self.addCleanup(p.stop)
         client,work,firm,terms=fixture()
         terms.pop('nr_contract')
@@ -246,14 +331,14 @@ class ContractIssueCases:
         before=iugn.get(lid)['revision']
         result=docs.issue(lid,bundle,terms)
         self.assertTrue(result['number'].startswith('CTR-'))
-        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),1)
+        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),2)
         current=iugn.get(lid)
         self.assertEqual(current['revision'],before+1)
         self.assertIn('contract_emis',current['state']['facts'])
         self.assertNotIn('contract_semnat',current['state']['facts'])
         self.assertEqual(Path(docs.open_form(lid)['issued']['path']).read_bytes(),result['data'])
         with self.assertRaisesRegex(ValueError,'deja emis'):docs.issue(lid,bundle,terms)
-        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),1)
+        self.assertEqual(len(db.lista_atasamente(1,lucrare_id=lid)),2)
 
     def test_changed_configuration_rejects_issue_without_consuming_number(self):
         lid,bundle,terms=self.setup_contract()

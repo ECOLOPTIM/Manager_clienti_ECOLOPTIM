@@ -12,9 +12,12 @@ def render_documente_panel(user,client_id,client,**kwargs):
     lid=st.session_state.get(key)
     work=db.get_lucrare(int(lid)) if lid else None
     if work and work.get('tip_lucrare')==WORK_TYPE:
-        choice=st.selectbox('Documente IUGN',['Contract IUGN cu anexe','Alte documente'],key=f'iugn_doc_choice_{lid}')
-        if choice=='Contract IUGN cu anexe':
-            render(int(lid))
+        choice=st.selectbox('Documente IUGN',['Contract IUGN cu anexe','Contract de mandat IUGN','Alte documente'],key=f'iugn_doc_choice_{lid}')
+        if choice in ('Contract IUGN cu anexe','Contract de mandat IUGN'):
+            if choice=='Contract IUGN cu anexe':render(int(lid))
+            else:
+                from tabs.components.iugn_mandate_form import render as render_mandate
+                render_mandate(int(lid))
             if st.button('Inchide documente',key=f'iugn_doc_close_{lid}'):
                 st.session_state.pop(key,None)
                 st.rerun()

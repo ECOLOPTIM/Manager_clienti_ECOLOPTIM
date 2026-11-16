@@ -207,7 +207,12 @@ def render_documente_panel(
     st.subheader(f"📄 Documente pentru lucrare ID {lucrare_id}")
 
     doc_type_key = f"{PREFIX}doc_type_{client_id}_{lucrare_id}"
-    chosen_type = st.selectbox("Alege template", list(TEMPLATE_MAP.keys()), key=doc_type_key)
+    document_types=list(TEMPLATE_MAP)
+    from db.iugn_rules import WORK_TYPE
+    if lucrare.get('tip_lucrare')==WORK_TYPE:
+        document_types=[name for name in document_types if name!="📝 Contract mandat"]
+        if st.session_state.get(doc_type_key) not in document_types:st.session_state.pop(doc_type_key,None)
+    chosen_type = st.selectbox("Alege template", document_types, key=doc_type_key)
     template_path = TEMPLATE_MAP[chosen_type]
 
     is_os = chosen_type == "🧾 OS (Ordin serviciu)"

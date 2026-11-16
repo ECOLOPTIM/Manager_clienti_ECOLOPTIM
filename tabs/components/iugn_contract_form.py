@@ -67,6 +67,8 @@ def render(lid):
                 st.error('Fisierul salvat nu corespunde documentului emis. Verifica arhiva.')
             else:st.download_button('Descarca contractul emis',data,file_name=issued['filename'],key=key+'_issued')
         else: st.error('Fisierul emis lipseste din arhiva. Restaureaza documentul din backup.')
+        from tabs.components.iugn_mandate_form import render as render_mandate
+        render_mandate(lid)
         return
     if st.button('Editeaza clientul',key=key+'_client_edit'):
         st.session_state[key+'_editing_client']=True
@@ -90,6 +92,9 @@ def render(lid):
              if not v and n in {'executant_email','autorizatie_proiectare_numar','autorizatie_proiectare_expirare',
                                 'autorizatie_executie_numar','autorizatie_executie_expirare'}]
     if missing:st.warning('Completeaza Date generale: '+', '.join(missing))
+    st.caption('La emitere se salveaza impreuna contractul si mandatul, cu numere distincte corelate. Semnaturile se confirma separat.')
+    if not bundle.get('mandate_template_hash'):
+        st.warning('Instaleaza sablonul de mandat ca templates/contract_mandat_iugn.docx, apoi reincarca datele contractului.')
     st.caption('Numarul se aloca numai la emitere. Sumele sunt cu TVA; taxele Distrigaz sunt separate.')
     defaults=dict(bundle['beneficiary_defaults'])
     if bundle['beneficiary_inherited']:
@@ -156,7 +161,8 @@ def render(lid):
                 data=docs.preview(bundle,values)
                 plan=contract.deadlines.budget(values,values['data_contract'])
                 st.info('Incadrare de baza: receptie estimata '+plan['reception'].strftime('%d.%m.%Y')+'; termen total estimat '+plan['expiry'].strftime('%d.%m.%Y')+'. Asteptarea documentelor, programarile si PIF trebuie sa incapa in timpul ramas. Data efectiva de inceput este semnarea contractului.')
-                st.session_state[key+'_preview']={'terms':values,'data':data}
+                mandate_data=docs.preview_mandate(bundle,values) if bundle.get('mandate_template_hash') else None
+                st.session_state[key+'_preview']={'terms':values,'data':data,'mandate_data':mandate_data}
             else:st.success('Ciorna salvata. Datele clientului si ale lucrarii nu au fost modificate.')
         except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))
     approved=st.session_state.get(key+'_preview')
@@ -166,8 +172,10 @@ def render(lid):
         approved=None
     if approved:
         st.download_button('Descarca previzualizarea DOCX',approved['data'],file_name=f'PREVIZUALIZARE_IUGN_L-{lid}.docx',key=key+'_download')
+        if approved.get('mandate_data'):
+            st.download_button('Descarca previzualizarea mandatului',approved['mandate_data'],file_name=f'PREVIZUALIZARE_MANDAT_IUGN_L-{lid}.docx',key=key+'_mandate_download')
         st.caption('La emitere se folosesc datele previzualizate. Pentru modificari apasa din nou Verifica si previzualizeaza.')
-        if st.button('Emite si salveaza contractul in dosar',key=key+'_issue',disabled=not client.get('profile_saved')):
+        if st.button('Emite si salveaza contractul in dosar',key=key+'_issue',disabled=not client.get('profile_saved') or not bundle.get('mandate_template_hash')):
             try:
                 docs.issue(lid,bundle,approved['terms'])
             except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))

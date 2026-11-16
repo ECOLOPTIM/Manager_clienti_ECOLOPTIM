@@ -18,6 +18,8 @@ def migrate(conn):
         lucrare_id INTEGER PRIMARY KEY REFERENCES lucrari(id), number TEXT UNIQUE NOT NULL,
         filename TEXT NOT NULL, path TEXT NOT NULL, sha256 TEXT NOT NULL,
         snapshot TEXT NOT NULL, issued_by TEXT NOT NULL, issued_at TEXT NOT NULL)''')
+    from db.iugn_mandates import migrate as migrate_mandates
+    migrate_mandates(conn)
 
 
 def _dump(value):
@@ -102,7 +104,8 @@ def open_form(lid):
         draft=_row(conn,'SELECT * FROM iugn_contract_drafts WHERE lucrare_id=?',(lid,))
         issued=_row(conn,'SELECT * FROM iugn_contract_issues WHERE lucrare_id=?',(lid,))
         beneficiary_defaults,inherited=_beneficiary_defaults(conn,client,int(lid))
-    return {'client':client,'work':work,'company':company.get(),
+    from db.iugn_mandates import template_hash as mandate_hash
+    return {'mandate_template_hash':mandate_hash(),'client':client,'work':work,'company':company.get(),
             'beneficiary_defaults':beneficiary_defaults,'beneficiary_inherited':inherited,
             'draft_revision':draft['revision'] if draft else 0,
             'terms':{k:v for k,v in json.loads(draft['payload']).items() if k!='beneficiar_cnp'} if draft else {},'issued':issued,
@@ -144,7 +147,7 @@ def canonical_terms(client,work,terms):
     return values
 
 
-def preview(bundle,terms):
+def _preview_values(bundle,terms):
     permissions.require('write')
     firm=dict(bundle['company']['values'])
     for name in ('gdpr_pastrare_acte','gdpr_pastrare_contabil','gdpr_pastrare_contract','gdpr_pastrare_tehnic','gdpr_transferuri'):
@@ -153,11 +156,25 @@ def preview(bundle,terms):
     draft=contract.offer_as_estimate(dict(canonical_terms(bundle['client'],bundle['work'],terms),nr_contract='PREVIZUALIZARE'))
     if not str(draft.get('nr_deviz') or '').strip():draft['nr_deviz']='NECOMPLETAT'
     if not draft.get('data_deviz'):draft['data_deviz']=draft.get('data_contract') or date.today().isoformat()
+    return firm,draft
+
+
+def preview(bundle,terms):
+    firm,draft=_preview_values(bundle,terms)
     return contract.generate_contract(bundle['client'],bundle['work'],firm,draft)
+
+
+def preview_mandate(bundle,terms):
+    from utils import iugn_mandate
+    firm,draft=_preview_values(bundle,terms)
+    context=contract.prepare_context(bundle['client'],bundle['work'],firm,draft)
+    return iugn_mandate.generate(iugn_mandate.context(context,'PREVIZUALIZARE'))
 
 
 def issue(lid,bundle,terms):
     permissions.require('write')
+    from db import iugn_mandates
+    mandate_journal=[]
     filepath=None
     created=False
     try:
@@ -172,6 +189,8 @@ def issue(lid,bundle,terms):
             draft=_row(conn,'SELECT revision,payload FROM iugn_contract_drafts WHERE lucrare_id=?',(lid,))
             if firm['revision']!=bundle['company']['revision'] or (draft['revision'] if draft else 0)!=bundle['draft_revision']:
                 raise ValueError('Configuratia firmei sau ciorna s-a modificat. Reincarca documentele.')
+            if not bundle.get('mandate_template_hash') or iugn_mandates.template_hash()!=bundle['mandate_template_hash']:
+                raise ValueError('Instaleaza sablonul de mandat si reincarca documentele.')
             template_hash=hashlib.sha256(contract.TEMPLATE.read_bytes()).hexdigest()
             if template_hash!=bundle['template_hash']: raise ValueError('Sablonul s-a modificat. Reincarca documentele.')
             values=json.loads(firm['payload'])
@@ -214,11 +233,14 @@ def issue(lid,bundle,terms):
                         (lid,number,filename,str(filepath),sha,snapshot,actor,at))
             db._execute(cur,'''INSERT INTO atasamente(client_id,filename,path,uploaded_by,upload_date,lucrare_id,sarcina_id)
                 VALUES (?,?,?,?,?,?,NULL)''',(client['id'],filename,str(filepath),actor,at,lid))
+            service={'number':number,'snapshot':snapshot,'sha256':sha}
+            iugn_mandates.persist(conn,int(lid),service,mandate_journal,bundle['mandate_template_hash'])
             occurred=datetime.strptime(context['data_contract'],'%d.%m.%Y').date().isoformat()
             iugn.record_event_in_transaction(conn,lid,'contract_emis',occurred,expected_revision=flow['revision'],
                 note=f'{number}; document {filename}; SHA256 {sha}')
         return {'number':number,'filename':filename,'data':data}
     except BaseException:
+        iugn_mandates.cleanup(mandate_journal)
         if created:
             # A lost commit acknowledgement is ambiguous. Never delete an issued
             # document unless a fresh read confirms it was not committed.

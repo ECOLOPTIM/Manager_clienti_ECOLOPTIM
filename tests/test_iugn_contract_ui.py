@@ -19,6 +19,7 @@ class ContractFormUI(unittest.TestCase):
     tearDown=cases.ContractIssueSQLite.tearDown
     setup_contract=cases.ContractIssueCases.setup_contract
     new_contract_work=cases.ContractIssueCases.new_contract_work
+    old_contract_without_mandate=cases.ContractIssueCases.old_contract_without_mandate
     # Reuse persistence setup while adding a complete browser form scenario.
     def test_single_deviz_offer_fields_preview_and_issue(self):
         lid,bundle,terms=self.setup_contract()
@@ -66,6 +67,19 @@ class ContractFormUI(unittest.TestCase):
         self.assertEqual(next(x for x in app.text_input if x.label=='Numar deviz-oferta').value,'')
         self.assertEqual(next(x for x in app.number_input if x.label=='Proiectare cu TVA').value,0)
         self.assertTrue(any('Client demonstrativ' in x.value for x in app.markdown))
+
+    def test_existing_contract_mandate_can_be_previewed_and_saved_from_documents(self):
+        from db import iugn_mandates
+        lid=self.old_contract_without_mandate()
+        app=AppTest.from_string(APP,default_timeout=15);app.session_state['test_lid']=lid
+        app.run();self.assertFalse(app.exception)
+        next(x for x in app.selectbox if x.label=='Documente IUGN').select('Contract de mandat IUGN').run()
+        next(x for x in app.button if x.label=='Previzualizeaza mandatul').click().run()
+        self.assertFalse(app.exception);self.assertFalse(app.error)
+        next(x for x in app.button if x.label=='Emite si salveaza mandatul in dosar').click().run()
+        self.assertFalse(app.exception);self.assertFalse(app.error)
+        self.assertTrue(any('Mandat emis:' in x.value for x in app.success))
+        self.assertIsNotNone(iugn_mandates.get(lid))
 
     def test_browser_preview_then_issue_and_reopen(self):
         lid,bundle,terms=self.setup_contract()
