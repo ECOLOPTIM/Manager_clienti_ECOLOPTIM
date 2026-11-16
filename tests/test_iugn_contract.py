@@ -28,7 +28,7 @@ def fixture(kind='PF'):
                  corespondenta_diferita=False, beneficiar_banca='', beneficiar_iban='',
                  beneficiar_ci_data='2020-01-01', nr_contract='DEMO-1',
                  data_oferta='2026-10-30', data_deviz='2026-10-30',
-                 durata_contract_zile=90, avans_procent=50,
+                 durata_contract_zile=90, **ic.deadlines.STAGE_DEFAULTS, avans_procent=50,
                  valoare_proiectare=500, valoare_verificare=100, valoare_avize=0,
                  valoare_executie_receptie=2100, valoare_asistenta_pif=100)
     client={'id': 1, 'nume': 'Ion & Ana <Test>', 'email': 'client@example.invalid', 'ci_numar': '012345'}
@@ -103,6 +103,28 @@ class ContractIUGNTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractDataError,'data_oferta'):
             prepare_context(*args)
 
+    def test_durations_use_defaults_and_reject_an_impossible_total(self):
+        args=list(fixture())
+        for field in ic.deadlines.STAGE_DEFAULTS:args[3].pop(field)
+        ctx=prepare_context(*args)
+        self.assertEqual(ctx['durata_proiectare_zile'],'10')
+        args[3]['durata_proiectare_zile']=7
+        self.assertEqual(prepare_context(*args)['durata_proiectare_zile'],'7')
+        args[3]['durata_contract_zile']=5
+        with self.assertRaisesRegex(ValueError,'nu se incadreaza'):prepare_context(*args)
+        args[3]['durata_contract_zile']=90
+        for invalid in (0,-1,1.5,'NaN'):
+            args[3]['durata_verificare_zile']=invalid
+            with self.assertRaises(ValueError):prepare_context(*args)
+
+    def test_legacy_stage_texts_accept_new_durations(self):
+        template=Document(ic.TEMPLATE)
+        template.add_paragraph('- durata receptiei tehnice a instalatiei de utilizare a gazelor naturale este de 1 zi lucratoare;')
+        template.save(ic.TEMPLATE)
+        args=list(fixture());args[3]['durata_receptie_zile']=3
+        text='\n'.join(p.text for p in Document(BytesIO(generate_contract(*args))).paragraphs)
+        self.assertIn('este de 3 zile lucratoare',text)
+
     def test_common_texts_have_defaults(self):
         args=list(fixture())
         for field in ('descriere_lucrare','defalcare_avize','documente_detectoare_beneficiar'):
@@ -142,6 +164,32 @@ class ContractIUGNTests(unittest.TestCase):
             args=list(fixture());args[3][key]=value
             with self.subTest(key=key), self.assertRaises(ContractDataError):
                 generate_contract(*args)
+
+
+class ContractDeadlines(unittest.TestCase):
+    def test_calendar_skips_weekends_fixed_and_movable_holidays(self):
+        from datetime import date
+        d=ic.deadlines
+        self.assertEqual(d.after_workdays('2026-11-27',2),date(2026,12,3))
+        self.assertEqual(d.execution_finish('2026-11-27',2),date(2026,12,2))
+        self.assertEqual(d.after_workdays('2026-04-09',1),date(2026,4,14))
+        self.assertEqual(d.after_workdays('2026-12-24',1),date(2026,12,28))
+        self.assertEqual(d.orthodox_easter(2027),date(2027,5,2))
+
+    def test_report_uses_actual_signature_triggers_and_current_schedule(self):
+        from datetime import date
+        d=ic.deadlines;ctx={'durata_contract_zile':90,**d.STAGE_DEFAULTS}
+        state={'facts':{'contract_emis':{'date':'2026-10-01'}},'exceptions':{}}
+        self.assertEqual(d.report(ctx,state),[])
+        state['facts'].update(contract_semnat={'date':'2026-11-16'},documente_complete={'date':'2026-11-18'},notificare_primita={'date':'2026-11-20'})
+        rows=d.report(ctx,state,today=date(2026,12,9))
+        self.assertEqual(rows[0]['Termen'],'2027-02-14')
+        self.assertEqual(rows[1]['Termen'],'2026-12-08')
+        self.assertEqual(rows[1]['Stare'],'Depasit')
+        state['facts']['executie_programata']={'date':'2026-11-20','scheduled_for':'2027-02-20'}
+        self.assertTrue(d.report(ctx,state,today=date(2026,12,9))[-1]['Depaseste durata contractului'])
+        state['facts']['executie_programata']['scheduled_for']='2026-12-10'
+        self.assertFalse(d.report(ctx,state,today=date(2026,12,9))[-1]['Depaseste durata contractului'])
 
 
 if __name__=='__main__':

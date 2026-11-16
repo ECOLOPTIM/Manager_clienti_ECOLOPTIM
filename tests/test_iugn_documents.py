@@ -47,6 +47,15 @@ class ContractIssueCases:
         self.assertEqual(snapshot['context']['data_deviz'],'29.10.2026')
         self.assertIn('contract_emis',iugn.get(lid)['state']['facts'])
 
+    def test_impossible_durations_do_not_issue_or_advance_workflow(self):
+        lid,bundle,terms=self.setup_contract()
+        terms=dict(terms,durata_contract_zile=1,**ic.deadlines.STAGE_DEFAULTS)
+        before=iugn.get(lid)
+        with self.assertRaisesRegex(ValueError,'nu se incadreaza'):docs.issue(lid,bundle,terms)
+        self.assertIsNone(docs.open_form(lid)['issued'])
+        self.assertEqual(iugn.get(lid),before)
+        self.assertTrue(db.lista_atasamente(1,lucrare_id=lid).empty)
+
     def test_cnp_is_not_copied_from_client_or_legacy_draft_into_contract_snapshot(self):
         lid,bundle,terms=self.setup_contract()
         with closing(db._connect()) as conn,conn:

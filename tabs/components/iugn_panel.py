@@ -73,6 +73,16 @@ def render(lucrare_id, client_id):
         st.rerun()
     for col, (stream, label) in zip(st.columns(4), rules.stream_states(state).items()):
         col.metric(stream, label)
+    from db import iugn_documents
+    deadlines=iugn_documents.contract_deadlines(lucrare_id,live['state'])
+    if deadlines:
+        st.markdown('**Termenele contractului**')
+        st.dataframe(pd.DataFrame(deadlines),hide_index=True,width='stretch')
+        if any(row['Stare']=='Depasit' or row['Depaseste durata contractului'] for row in deadlines):
+            st.warning('Exista un termen depasit sau o etapa programata dupa durata contractului. Verifica lucrarea si necesitatea unui act aditional; termenul nu se prelungeste automat.')
+        st.caption('Calcul orientativ: luni-vineri, fara sarbatorile nationale si cele mobile ortodoxe. Verifica alte zile nelucratoare aplicabile. Receptia tehnica se urmareste din documente; nu este confirmata automat.')
+    elif iugn.has_contract_document(lucrare_id):
+        st.caption('Termenele efective se calculeaza dupa confirmarea contractului semnat.')
     st.markdown('**Persoane desemnate**')
     for role, label in rules.ROLES.items():
         st.write(f"{label}: {state['roles'][role] or 'Nedesemnat'}")

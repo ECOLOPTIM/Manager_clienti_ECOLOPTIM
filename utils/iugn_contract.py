@@ -14,6 +14,7 @@ from docx import Document
 
 from docxtpl import DocxTemplate
 from jinja2 import Environment, StrictUndefined
+from utils import iugn_deadlines as deadlines
 
 TEMPLATE = Path(__file__).resolve().parents[1] / 'templates' / 'contract_iugn.docx'
 ADDRESS_PARTS = ('judet', 'localitate', 'strada', 'numar', 'bloc', 'scara', 'etaj', 'apartament', 'cod_postal')
@@ -48,13 +49,15 @@ def contract_template():
         containers.extend((section.header,section.footer))
     for container in containers:
         for paragraph in paragraphs(container):
-            if 'beneficiar_cnp' not in paragraph.text and 'devizul tehnico-economic' not in paragraph.text.lower() and 'Oferta de referinta:' not in paragraph.text:
+            if 'beneficiar_cnp' not in paragraph.text and 'devizul tehnico-economic' not in paragraph.text.lower() and 'Oferta de referinta:' not in paragraph.text and not paragraph.text.startswith(('- durata proiectarii','- durata verificarii','- durata executiei','- durata receptiei')):
                 continue
             text=re.sub(r',\s*CNP\s*\{\{\s*beneficiar_cnp\s*\}\}', '', paragraph.text,flags=re.I)
             text=re.sub(r'\bCNP\s*:?\s*\{\{\s*beneficiar_cnp\s*\}\}', '', text,flags=re.I)
             text=re.sub(r'\{\{\s*beneficiar_cnp\s*\}\}', '', text)
             text=re.sub(r'(?i)(?:oferta/)?devizul tehnico-economic', lambda m: 'Devizul-oferta' if m.group()[0].isupper() else 'devizul-oferta', text)
             text=text.replace('Oferta de referinta:', 'Deviz-oferta de referinta:')
+            for prefix,field in [('- durata proiectarii','durata_proiectare_zile'),('- durata verificarii','durata_verificare_zile'),('- durata executiei','durata_executie_zile'),('- durata receptiei','durata_receptie_zile')]:
+                if text.startswith(prefix):text=re.sub(r'este de \d+ (?:zi|zile) lucratoare', 'este de {{ '+field+' }} zile lucratoare', text)
             formatting=deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
             paragraph.text=text
             if formatting is not None and paragraph.runs:
@@ -123,7 +126,7 @@ def prepare_context(client, work, company, terms):
     """
     if not client.get('id') or str(work.get('client_id')) != str(client['id']):
         raise ContractDataError('Lucrarea nu apartine clientului selectat.')
-    names = template_variables()
+    names = template_variables() | set(deadlines.STAGE_DEFAULTS)
     # Ignore a legacy draft's CNP without exporting or storing a new copy.
     terms=offer_as_estimate({name:value for name,value in terms.items() if name!='beneficiar_cnp'})
     ctx = {name: '' for name in names}
@@ -139,6 +142,8 @@ def prepare_context(client, work, company, terms):
         raise ContractDataError('Datele firmei si GDPR se furnizeaza prin configuratia firmei.')
     ctx.update(company)
     ctx.update(terms)
+    for field,value in deadlines.STAGE_DEFAULTS.items():
+        if field not in terms:ctx[field]=value
     if not str(ctx.get('descriere_lucrare') or '').strip():
         ctx['descriere_lucrare']=work.get('tip_lucrare') or 'Instalatie de utilizare a gazelor naturale'
     if not str(ctx.get('defalcare_avize') or '').strip() and _number(ctx.get('valoare_avize') or 0,'valoare_avize')==0:
@@ -178,6 +183,8 @@ def prepare_context(client, work, company, terms):
     if duration <= 0 or duration != duration.to_integral_value():
         raise ContractDataError('Durata trebuie sa fie un numar intreg pozitiv de zile.')
     ctx['durata_contract_zile']=str(int(duration))
+    for field,value in deadlines.terms(ctx).items():ctx[field]=str(value)
+    deadlines.budget(ctx,ctx['data_contract'])
     prices = {name: _money(_number(ctx[name], name)) for name in MONEY_INPUTS}
     total = sum(prices.values())
     agreed_total = _money(_number(work.get('valoare_contractata'), 'valoare_contractata'))

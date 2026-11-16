@@ -40,6 +40,19 @@ class ContractFormUI(unittest.TestCase):
         self.assertFalse(app.error)
         self.assertIsNotNone(docs.open_form(lid)['issued'])
 
+    def test_stage_durations_are_saved_and_impossible_total_blocks_preview(self):
+        lid,bundle,terms=self.setup_contract()
+        app=AppTest.from_string(APP,default_timeout=15);app.session_state['test_lid']=lid
+        app.run()
+        next(x for x in app.number_input if x.label=='Proiectare - zile lucratoare').set_value(7)
+        next(b for b in app.button if b.label=='Verifica si previzualizeaza').click().run()
+        self.assertFalse(app.exception);self.assertFalse(app.error)
+        self.assertEqual(docs.open_form(lid)['terms']['durata_proiectare_zile'],7)
+        next(x for x in app.number_input if x.label=='Durata contractului in zile calendaristice').set_value(1)
+        next(b for b in app.button if b.label=='Verifica si previzualizeaza').click().run()
+        self.assertTrue(app.error)
+        self.assertFalse(any(b.label=='Emite si salveaza contractul in dosar' for b in app.button))
+
     def test_browser_preview_then_issue_and_reopen(self):
         lid,bundle,terms=self.setup_contract()
         app=AppTest.from_string(APP,default_timeout=15)

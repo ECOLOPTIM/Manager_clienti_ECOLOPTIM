@@ -62,7 +62,7 @@ def save_draft(lid,terms,*,expected_revision):
     # Persist only contract fields; company data is controlled through Date generale.
     from config.company_fields import COMPANY_FIELDS
     terms=contract.offer_as_estimate({name:value for name,value in terms.items() if name!='beneficiar_cnp'})
-    names=contract.template_variables()
+    names=contract.template_variables() | set(contract.deadlines.STAGE_DEFAULTS)
     if set(terms)-names or set(terms)&COMPANY_FIELDS.keys() or 'nr_contract' in terms:
         raise ValueError('Ciorna contine campuri nepermise.')
     actor=permissions.actor_username() or 'mentenanta locala'
@@ -161,3 +161,12 @@ def issue(lid,bundle,terms):
             except Exception:
                 pass  # Keep the file for reconciliation if the DB is unavailable.
         raise
+
+
+def contract_deadlines(lid,state):
+    """Read immutable issued terms without exposing a client/company snapshot."""
+    permissions.require('read')
+    with closing(db._connect()) as conn:
+        issued=_row(conn,'SELECT snapshot FROM iugn_contract_issues WHERE lucrare_id=?',(lid,))
+    if not issued:return []
+    return contract.deadlines.report(json.loads(issued['snapshot'])['context'],state)

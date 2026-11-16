@@ -291,6 +291,22 @@
     },
     "valoare_verificare": {
       "source": "contract_terms"
+    },
+    "durata_proiectare_zile": {
+      "source": "contract_terms",
+      "default": 10
+    },
+    "durata_verificare_zile": {
+      "source": "contract_terms",
+      "default": 5
+    },
+    "durata_executie_zile": {
+      "source": "contract_terms",
+      "default": 2
+    },
+    "durata_receptie_zile": {
+      "source": "contract_terms",
+      "default": 1
     }
   }
 }

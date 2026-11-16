@@ -7,6 +7,7 @@ from utils import iugn_contract as contract
 from config.company_fields import COMPANY_FIELDS
 
 LABELS={
+ **contract.deadlines.STAGE_LABELS,
  'beneficiar_nume':'Nume beneficiar / reprezentant','beneficiar_firma':'Denumire beneficiar persoana juridica',
  'beneficiar_cui':'CUI beneficiar','beneficiar_regcom':'Registrul Comertului beneficiar',
  'beneficiar_reprezentant_calitate':'Calitatea reprezentantului beneficiarului',
@@ -51,7 +52,9 @@ def render(lid):
     if key not in st.session_state: st.session_state[key]=docs.open_form(lid)
     bundle=st.session_state[key]
     if st.button('Reincarca datele contractului',key=key+'_reload'):
-        st.session_state.pop(key,None);st.session_state.pop(key+'_preview',None);st.rerun()
+        for state_key in list(st.session_state):
+            if state_key.startswith(key):st.session_state.pop(state_key,None)
+        st.rerun()
     issued=bundle['issued']
     if issued:
         st.success('Contract emis: '+issued['number'])
@@ -89,7 +92,7 @@ def render(lid):
     correspondence=st.checkbox('Adresa de corespondenta diferita',value=bool(defaults.get('corespondenta_diferita')),key=key+'_correspondence')
     st.caption('Devizul-oferta este un singur document, cu un singur numar si o singura data.')
     values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence}
-    with st.form(key+f"_form_{bundle['draft_revision']}"):
+    with st.form(key+'_form'):
         for group,names in [
             ('Beneficiar', ['beneficiar_nume']+(['beneficiar_firma','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate'] if kind=='PJ'
                 else ['beneficiar_ci_serie','beneficiar_ci_nr','beneficiar_ci_emitent','beneficiar_ci_data'])+
@@ -97,7 +100,7 @@ def render(lid):
             ('Domiciliul sau sediul beneficiarului',['beneficiar_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa lucrarii',['adresa_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa de corespondenta',['corespondenta_'+p for p in contract.ADDRESS_PARTS] if correspondence else []),
-            ('Contract si deviz-oferta',['data_contract','nr_oferta','data_oferta','durata_contract_zile','descriere_lucrare','documente_detectoare_beneficiar']),
+            ('Contract si deviz-oferta',['data_contract','nr_oferta','data_oferta','durata_contract_zile',*contract.deadlines.STAGE_DEFAULTS,'descriere_lucrare','documente_detectoare_beneficiar']),
             ('Pret si transe',[*contract.MONEY_INPUTS,'defalcare_avize','avans_procent']),
         ]:
             if not names:continue
@@ -105,11 +108,11 @@ def render(lid):
             for name in names:
                 label=LABELS.get(name,name.split('_',1)[-1].replace('_',' ').capitalize())
                 val=defaults.get(name,'')
-                if name in contract.MONEY_INPUTS or name in ('avans_procent','durata_contract_zile'):
-                    fallback=50 if name=='avans_procent' else 90 if name=='durata_contract_zile' else 0
+                if name in contract.MONEY_INPUTS or name in ('avans_procent','durata_contract_zile') or name in contract.deadlines.STAGE_DEFAULTS:
+                    fallback=50 if name=='avans_procent' else 90 if name=='durata_contract_zile' else contract.deadlines.STAGE_DEFAULTS.get(name,0)
                     try:number=float(val) if str(val) else float(fallback)
                     except (ValueError,TypeError):number=float(fallback)
-                    values[name]=st.number_input(label,value=number,min_value=0.0,step=1.0 if name in ('avans_procent','durata_contract_zile') else 0.01,key=key+'_'+name)
+                    values[name]=st.number_input(label,value=number,min_value=0.0,step=1.0 if name in ('avans_procent','durata_contract_zile') or name in contract.deadlines.STAGE_DEFAULTS else 0.01,key=key+'_'+name)
                 elif name.endswith('_data') or name.startswith('data_'):
                     dt=_date(val) or (date.today() if name=='data_contract' else None)
                     chosen=st.date_input(label,value=dt,format='DD.MM.YYYY',key=key+'_'+name)
@@ -127,6 +130,8 @@ def render(lid):
             st.session_state.pop(key+'_preview',None)
             if check:
                 data=docs.preview(bundle,values)
+                plan=contract.deadlines.budget(values,values['data_contract'])
+                st.info('Incadrare de baza: receptie estimata '+plan['reception'].strftime('%d.%m.%Y')+'; termen total estimat '+plan['expiry'].strftime('%d.%m.%Y')+'. Asteptarea documentelor, programarile si PIF trebuie sa incapa in timpul ramas. Data efectiva de inceput este semnarea contractului.')
                 st.session_state[key+'_preview']={'terms':values,'data':data}
             else:st.success('Ciorna salvata. Datele clientului si ale lucrarii nu au fost modificate.')
         except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))
