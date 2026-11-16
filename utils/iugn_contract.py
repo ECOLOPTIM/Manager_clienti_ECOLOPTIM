@@ -35,7 +35,7 @@ class ContractDataError(ValueError):
 
 
 def contract_template():
-    """Support installed older templates without collecting or printing CNP."""
+    """Adapt installed templates to one Deviz-oferta and remove legacy CNP."""
     source=Document(TEMPLATE)
     def paragraphs(container):
         yield from container.paragraphs
@@ -48,12 +48,13 @@ def contract_template():
         containers.extend((section.header,section.footer))
     for container in containers:
         for paragraph in paragraphs(container):
-            if 'beneficiar_cnp' not in paragraph.text and 'devizul tehnico-economic' not in paragraph.text.lower():
+            if 'beneficiar_cnp' not in paragraph.text and 'devizul tehnico-economic' not in paragraph.text.lower() and 'Oferta de referinta:' not in paragraph.text:
                 continue
             text=re.sub(r',\s*CNP\s*\{\{\s*beneficiar_cnp\s*\}\}', '', paragraph.text,flags=re.I)
             text=re.sub(r'\bCNP\s*:?\s*\{\{\s*beneficiar_cnp\s*\}\}', '', text,flags=re.I)
             text=re.sub(r'\{\{\s*beneficiar_cnp\s*\}\}', '', text)
-            text=re.sub(r'(?<!/)\b[Dd]evizul tehnico-economic', lambda m: 'Oferta/devizul tehnico-economic' if m.group()[0].isupper() else 'oferta/devizul tehnico-economic', text)
+            text=re.sub(r'(?i)(?:oferta/)?devizul tehnico-economic', lambda m: 'Devizul-oferta' if m.group()[0].isupper() else 'devizul-oferta', text)
+            text=text.replace('Oferta de referinta:', 'Deviz-oferta de referinta:')
             formatting=deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
             paragraph.text=text
             if formatting is not None and paragraph.runs:
@@ -98,15 +99,17 @@ def _date(value, field):
 
 
 def offer_as_estimate(terms):
-    """An absent separate estimate uses the accepted offer as one document pair.
+    """One Deviz-oferta reference, mirrored to legacy template variables.
 
-    Preserve supplied separate estimates, including incomplete ones for validation.
-    Never combine a separate number with the date of another document.
+    The offer pair is canonical. A legacy estimate-only draft is recovered as a
+    complete pair only when both canonical fields are absent; never mix documents.
     """
     result=dict(terms)
-    if not any(str(result.get(k) or '').strip() for k in ('nr_deviz','data_deviz')):
-        result['nr_deviz']=result.get('nr_oferta') or ''
-        result['data_deviz']=result.get('data_oferta') or ''
+    if not any(str(result.get(k) or '').strip() for k in ('nr_oferta','data_oferta')):
+        result['nr_oferta']=result.get('nr_deviz') or ''
+        result['data_oferta']=result.get('data_deviz') or ''
+    result['nr_deviz']=result.get('nr_oferta') or ''
+    result['data_deviz']=result.get('data_oferta') or ''
     return result
 
 
@@ -147,7 +150,7 @@ def prepare_context(client, work, company, terms):
     if not isinstance(ctx['corespondenta_diferita'], bool):
         raise ContractDataError('corespondenta_diferita trebuie sa fie boolean.')
 
-    optional = {'beneficiar_banca', 'beneficiar_iban', 'client_email', 'client_telefon',
+    optional = {'nr_deviz', 'data_deviz', 'beneficiar_banca', 'beneficiar_iban', 'client_email', 'client_telefon',
                 'executant_telefon', 'gdpr_contact_dpo'}
     for prefix in ('beneficiar_', 'executant_', 'adresa_', 'corespondenta_'):
         optional.update(prefix + part for part in ADDRESS_PARTS[4:])

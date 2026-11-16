@@ -38,7 +38,7 @@ class ContractIssueCases:
         terms=dict(terms,nr_oferta='OF-42',data_oferta='2026-10-29',nr_deviz='',data_deviz='')
         docs.save_draft(lid,terms,expected_revision=bundle['draft_revision'])
         bundle=docs.open_form(lid)
-        self.assertEqual(bundle['terms']['nr_deviz'],'')
+        self.assertEqual(bundle['terms']['nr_deviz'],'OF-42')
         docs.preview(bundle,terms)
         docs.issue(lid,bundle,terms)
         import json

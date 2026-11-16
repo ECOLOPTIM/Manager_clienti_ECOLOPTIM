@@ -61,7 +61,7 @@ def save_draft(lid,terms,*,expected_revision):
         raise ValueError('Revizie de ciorna invalida.')
     # Persist only contract fields; company data is controlled through Date generale.
     from config.company_fields import COMPANY_FIELDS
-    terms={name:value for name,value in terms.items() if name!='beneficiar_cnp'}
+    terms=contract.offer_as_estimate({name:value for name,value in terms.items() if name!='beneficiar_cnp'})
     names=contract.template_variables()
     if set(terms)-names or set(terms)&COMPANY_FIELDS.keys() or 'nr_contract' in terms:
         raise ValueError('Ciorna contine campuri nepermise.')

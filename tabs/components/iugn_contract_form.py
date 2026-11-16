@@ -14,8 +14,8 @@ LABELS={
  'beneficiar_ci_emitent':'CI eliberata de','beneficiar_ci_data':'Data eliberarii CI',
  'client_telefon':'Telefon beneficiar','client_email':'E-mail beneficiar',
  'beneficiar_banca':'Banca beneficiar optional','beneficiar_iban':'IBAN beneficiar optional',
- 'data_contract':'Data contractului','nr_oferta':'Numar oferta acceptata','data_oferta':'Data ofertei',
- 'nr_deviz':'Numar deviz anexat','data_deviz':'Data devizului','durata_contract_zile':'Durata contractului in zile calendaristice',
+ 'data_contract':'Data contractului','nr_oferta':'Numar deviz-oferta','data_oferta':'Data devizului-oferta',
+ 'nr_deviz':'Numar deviz-oferta','data_deviz':'Data devizului-oferta','durata_contract_zile':'Durata contractului in zile calendaristice',
  'descriere_lucrare':'Descrierea si continutul lucrarii','documente_detectoare_beneficiar':'Documente detectoare furnizate de beneficiar sau nu este cazul',
  'valoare_proiectare':'Proiectare cu TVA','valoare_verificare':'Verificare proiect cu TVA',
  'valoare_avize':'Avize incluse cu TVA','defalcare_avize':'Explicatii pentru avizele incluse sau nu este cazul',
@@ -72,7 +72,11 @@ def render(lid):
     st.caption('Numarul se aloca numai la emitere. Sumele sunt cu TVA; taxele Distrigaz sunt separate.')
     defaults={n:bundle['client'].get(src) or '' for n,src in contract.CLIENT_FIELDS.items()}
     defaults.update({n:bundle['work'].get(src) or '' for n,src in contract.WORK_FIELDS.items()})
-    defaults.update(bundle['terms'])
+    defaults.update(contract.offer_as_estimate(bundle['terms']))
+    legacy=bundle['terms']
+    if (legacy.get('nr_oferta') and legacy.get('nr_deviz') and legacy['nr_oferta']!=legacy['nr_deviz'] or
+            legacy.get('data_oferta') and legacy.get('data_deviz') and _date(legacy['data_oferta'])!=_date(legacy['data_deviz'])):
+        st.warning('Ciorna veche contine doua referinte diferite. Verifica devizul-oferta afisat; la salvare se foloseste o singura referinta.')
     if not defaults.get('descriere_lucrare'):
         defaults['descriere_lucrare']=bundle['work'].get('tip_lucrare') or 'Instalatie de utilizare a gazelor naturale'
     if not defaults.get('documente_detectoare_beneficiar'):
@@ -83,11 +87,8 @@ def render(lid):
                'Datele obligatorii se verifica integral inainte de emitere.')
     kind=st.selectbox('Tip beneficiar',['PF','PJ'],index=1 if defaults.get('beneficiar_tip')=='PJ' else 0,key=key+'_kind')
     correspondence=st.checkbox('Adresa de corespondenta diferita',value=bool(defaults.get('corespondenta_diferita')),key=key+'_correspondence')
-    separate_default=any(str(defaults.get(n) or '').strip() for n in ('nr_deviz','data_deviz'))
-    separate=st.checkbox('Exista un deviz separat de oferta',value=separate_default,key=key+'_separate_estimate')
-    if not separate:
-        st.caption('Oferta acceptata tine loc de deviz. Numarul si data ei se preiau automat in contract.')
-    values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence,'nr_deviz':'','data_deviz':''}
+    st.caption('Devizul-oferta este un singur document, cu un singur numar si o singura data.')
+    values={'beneficiar_tip':kind,'corespondenta_diferita':correspondence}
     with st.form(key+f"_form_{bundle['draft_revision']}"):
         for group,names in [
             ('Beneficiar', ['beneficiar_nume']+(['beneficiar_firma','beneficiar_cui','beneficiar_regcom','beneficiar_reprezentant_calitate'] if kind=='PJ'
@@ -96,7 +97,7 @@ def render(lid):
             ('Domiciliul sau sediul beneficiarului',['beneficiar_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa lucrarii',['adresa_'+p for p in contract.ADDRESS_PARTS]),
             ('Adresa de corespondenta',['corespondenta_'+p for p in contract.ADDRESS_PARTS] if correspondence else []),
-            ('Contract oferta si deviz',['data_contract','nr_oferta','data_oferta']+(['nr_deviz','data_deviz'] if separate else [])+['durata_contract_zile','descriere_lucrare','documente_detectoare_beneficiar']),
+            ('Contract si deviz-oferta',['data_contract','nr_oferta','data_oferta','durata_contract_zile','descriere_lucrare','documente_detectoare_beneficiar']),
             ('Pret si transe',[*contract.MONEY_INPUTS,'defalcare_avize','avans_procent']),
         ]:
             if not names:continue
@@ -119,6 +120,7 @@ def render(lid):
         save=st.form_submit_button('Salveaza ciorna contractului')
         check=st.form_submit_button('Verifica si previzualizeaza')
     if save or check:
+        values=contract.offer_as_estimate(values)
         try:
             rev=docs.save_draft(lid,values,expected_revision=bundle['draft_revision'])
             bundle['draft_revision']=rev;bundle['terms']=values
@@ -130,8 +132,7 @@ def render(lid):
         except (ValueError,PermissionError,OSError) as exc:st.error(_message(exc))
     approved=st.session_state.get(key+'_preview')
     if approved and (approved['terms']['beneficiar_tip']!=kind or
-                     approved['terms']['corespondenta_diferita']!=correspondence or
-                     any(bool(str(approved['terms'].get(n) or '').strip()) for n in ('nr_deviz','data_deviz'))!=separate):
+                     approved['terms']['corespondenta_diferita']!=correspondence):
         st.session_state.pop(key+'_preview',None)
         approved=None
     if approved:

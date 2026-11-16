@@ -69,7 +69,7 @@ class ContractIUGNTests(unittest.TestCase):
         self.assertNotIn('CNP',text)
         self.assertNotIn('beneficiar_cnp',prepare_context(*args))
 
-    def test_offer_supplies_estimate_as_a_pair_and_preserves_separate_estimates(self):
+    def test_single_deviz_offer_reference_is_used_throughout_contract(self):
         args=list(fixture())
         args[3].update(nr_oferta='OF-42',data_oferta='2026-10-29',nr_deviz='',data_deviz='')
         context=prepare_context(*args)
@@ -80,16 +80,26 @@ class ContractIUGNTests(unittest.TestCase):
         template.add_paragraph('Contractul este insotit de devizul tehnico-economic.')
         template.save(ic.TEMPLATE)
         text='\n'.join(p.text for p in Document(BytesIO(generate_contract(*args))).paragraphs)
-        self.assertIn('Oferta/devizul tehnico-economic nr. OF-42 / 29.10.2026',text)
-        self.assertIn('insotit de oferta/devizul tehnico-economic',text)
+        self.assertIn('Devizul-oferta nr. OF-42 / 29.10.2026',text)
+        self.assertIn('insotit de devizul-oferta',text)
         args[3].update(nr_deviz='DEV-9',data_deviz='2026-10-30')
         context=prepare_context(*args)
-        self.assertEqual(context['nr_deviz'],'DEV-9')
-        self.assertEqual(context['data_deviz'],'30.10.2026')
+        self.assertEqual(context['nr_deviz'],'OF-42')
+        self.assertEqual(context['data_deviz'],'29.10.2026')
         args[3]['data_deviz']=''
-        with self.assertRaisesRegex(ContractDataError,'data_deviz'):
-            prepare_context(*args)
+        self.assertEqual(prepare_context(*args)['data_deviz'],'29.10.2026')
         args[3].update(nr_deviz='',data_deviz='',data_oferta='')
+        with self.assertRaisesRegex(ContractDataError,'data_oferta'):
+            prepare_context(*args)
+
+    def test_estimate_only_legacy_draft_recovers_one_complete_pair(self):
+        args=list(fixture())
+        args[3].update(nr_oferta='',data_oferta='',nr_deviz='LEGACY-1',data_deviz='2026-10-28')
+        context=prepare_context(*args)
+        self.assertEqual(context['nr_oferta'],context['nr_deviz'])
+        self.assertEqual(context['nr_oferta'],'LEGACY-1')
+        self.assertEqual(context['data_oferta'],context['data_deviz'])
+        args[3]['nr_oferta']='NEW-1'
         with self.assertRaisesRegex(ContractDataError,'data_oferta'):
             prepare_context(*args)
 
@@ -128,7 +138,7 @@ class ContractIUGNTests(unittest.TestCase):
         self.assertEqual(c['pif_suma'], '280,00')
 
     def test_invalid_dates_and_nonfinite_numbers_are_rejected(self):
-        for key,value in [('data_deviz','2026-02-30'),('valoare_avize','NaN'),('avans_procent',91)]:
+        for key,value in [('data_oferta','2026-02-30'),('valoare_avize','NaN'),('avans_procent',91)]:
             args=list(fixture());args[3][key]=value
             with self.subTest(key=key), self.assertRaises(ContractDataError):
                 generate_contract(*args)

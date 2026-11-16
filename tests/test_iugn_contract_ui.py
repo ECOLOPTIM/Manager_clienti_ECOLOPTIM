@@ -19,23 +19,26 @@ class ContractFormUI(unittest.TestCase):
     tearDown=cases.ContractIssueSQLite.tearDown
     setup_contract=cases.ContractIssueCases.setup_contract
     # Reuse persistence setup while adding a complete browser form scenario.
-    def test_offer_mode_hides_duplicate_fields_and_invalidates_preview_on_switch(self):
+    def test_single_deviz_offer_fields_preview_and_issue(self):
         lid,bundle,terms=self.setup_contract()
-        terms.update(nr_deviz='',data_deviz='')
+        terms.update(nr_oferta='DO-17',data_oferta='2026-11-16',nr_deviz='',data_deviz='')
         docs.save_draft(lid,terms,expected_revision=bundle['draft_revision'])
         app=AppTest.from_string(APP,default_timeout=15)
         app.session_state['test_lid']=lid
         app.run()
         self.assertFalse(app.exception)
-        self.assertFalse(any(x.label=='Numar deviz anexat' for x in app.text_input))
-        self.assertFalse(any(x.label=='Data devizului' for x in app.date_input))
+        self.assertEqual(sum(x.label=='Numar deviz-oferta' for x in app.text_input),1)
+        self.assertEqual(sum(x.label=='Data devizului-oferta' for x in app.date_input),1)
+        self.assertFalse(any('deviz separat' in x.label for x in app.checkbox))
         next(b for b in app.button if b.label=='Verifica si previzualizeaza').click().run()
         self.assertFalse(app.error)
-        self.assertTrue(any(b.label=='Emite si salveaza contractul in dosar' for b in app.button))
-        next(c for c in app.checkbox if c.label=='Exista un deviz separat de oferta').check().run()
+        saved=docs.open_form(lid)['terms']
+        self.assertEqual(saved['nr_deviz'],saved['nr_oferta'])
+        self.assertEqual(saved['data_deviz'],saved['data_oferta'])
+        next(b for b in app.button if b.label=='Emite si salveaza contractul in dosar').click().run()
         self.assertFalse(app.exception)
-        self.assertTrue(any(x.label=='Numar deviz anexat' for x in app.text_input))
-        self.assertFalse(any(b.label=='Emite si salveaza contractul in dosar' for b in app.button))
+        self.assertFalse(app.error)
+        self.assertIsNotNone(docs.open_form(lid)['issued'])
 
     def test_browser_preview_then_issue_and_reopen(self):
         lid,bundle,terms=self.setup_contract()
