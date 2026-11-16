@@ -20,6 +20,8 @@ def migrate(conn):
         snapshot TEXT NOT NULL, issued_by TEXT NOT NULL, issued_at TEXT NOT NULL)''')
     from db.iugn_mandates import migrate as migrate_mandates
     migrate_mandates(conn)
+    from db.iugn_step_documents import migrate as migrate_step_documents
+    migrate_step_documents(conn)
 
 
 def _dump(value):

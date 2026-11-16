@@ -114,16 +114,8 @@ def render(lucrare_id, client_id):
                 else:
                     st.session_state.pop(cache, None)
                     st.rerun()
-    rows = []
-    for key, label, stream, role, _ in rules.STEPS:
-        done = key in state['facts']
-        problem = rules.blocked_reason(state, key)
-        rows.append({'Etapa': stream.capitalize(), 'Sarcina': label,
-                     'Stare': 'Finalizat' if done else 'In asteptare' if problem else 'Disponibil',
-                     'Persoana': 'Gelu' if role == 'manager' else state['roles'].get(role, ''),
-                     'Data': state['facts'].get(key, {}).get('date', ''),
-                     'Conditie': '' if done else problem})
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+    from tabs.components.iugn_step_documents import render as render_step_documents
+    render_step_documents(lucrare_id,state,revision,live['revision'],prefix,cache)
     st.caption('Contract emis se confirma automat din Documente, dupa salvarea contractului. '
                'Contract semnat este o etapa separata.')
     if 'contract_emis' in state['facts'] and not iugn.has_contract_document(lucrare_id):
@@ -178,7 +170,7 @@ def render(lucrare_id, client_id):
     with st.expander('Istoricul lucrarii'):
         events = iugn.history(lucrare_id)
         if not events.empty:
-            events['event_key'] = events['event_key'].map(lambda k: rules.EVENT_LABELS.get(k, 'Anulare confirmare manuala Contract emis' if k == 'corectie_contract_emis' else k))
+            events['event_key'] = events['event_key'].map(lambda k: rules.EVENT_LABELS.get(k, 'Anulare confirmare manuala Contract emis' if k == 'corectie_contract_emis' else 'Document incarcat' if k == 'document_incarcat' else k))
             events['detail'] = events['detail'].map(lambda d: json.dumps(json.loads(d), ensure_ascii=False))
             st.dataframe(events.rename(columns={'event_key': 'Eveniment', 'occurred_on': 'Data eveniment',
                 'recorded_at': 'Inregistrat la', 'actor': 'Utilizator', 'detail': 'Detalii',
@@ -190,5 +182,4 @@ def render(lucrare_id, client_id):
             st.caption('Nu exista sarcini anterioare.')
         else:
             st.dataframe(old[['tip_sarcina', 'status', 'responsabil', 'observatii']], hide_index=True)
-    st.caption('Prima etapa confirma evenimentele declarate de operator. Generarea si verificarea '
-               'documentelor, termenele automate, transele si inchiderea dosarului urmeaza separat.')
+    st.caption('Documentele sunt arhivate pe etape. Confirmarile actiunilor raman in istoricul lucrarii.')

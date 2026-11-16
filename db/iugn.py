@@ -219,6 +219,20 @@ def record_event_in_transaction(conn, lid, key, occurred_on, *, expected_revisio
     if key == 'contract_emis' and permissions.actor_username() is not None:
         if not contract_document_registered(conn, lid):
             raise ValueError('Contract emis se confirma automat din Documente, dupa emiterea si salvarea documentului.')
+    if key == 'contract_semnat' and permissions.actor_username() is not None:
+        cur=conn.cursor()
+        db._execute(cur, '''SELECT path,sha256 FROM iugn_step_documents
+            WHERE lucrare_id=? AND step_key='contract_semnat' AND kind='contract_semnat'
+            ORDER BY id DESC''', (int(lid),))
+        proof=cur.fetchone()
+        if not proof:
+            raise ValueError('Incarca exemplarul semnat folosind butonul de la etapa Contract semnat.')
+        from pathlib import Path
+        import hashlib
+        path=Path(proof[0])
+        if (not path.resolve().is_relative_to(Path(db.UPLOAD_DIR).resolve()) or not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest()!=proof[1]):
+            raise ValueError('Exemplarul semnat lipseste sau a fost modificat. Verifica arhiva.')
     new_state = rules.record(state, key, occurred_on, note)
     detail = {'note': str(note).strip()}
     work_fields = {}

@@ -732,6 +732,12 @@ def sterge_atasament(atas_id: int):
         c = conn.cursor()
         _execute(c, "SELECT path FROM atasamente WHERE id=?", (int(atas_id),))
         row = c.fetchone()
+        if row and row[0]:
+            _execute(c, '''SELECT 1 FROM iugn_step_documents WHERE path=?
+                UNION ALL SELECT 1 FROM iugn_contract_issues WHERE path=?
+                UNION ALL SELECT 1 FROM iugn_mandate_issues WHERE path=?''', (row[0],row[0],row[0]))
+            if c.fetchone():
+                raise ValueError('Documentul este pastrat in istoricul fluxului si nu se sterge din atasamente.')
         if row and row[0] and os.path.exists(row[0]):
             try:
                 os.remove(row[0])

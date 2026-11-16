@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements.txt
-      - run: python -W error::ResourceWarning -m unittest tests.test_iugn_ui tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_contract_ui tests.test_local_pg_config
+      - run: python -W error::ResourceWarning -m unittest tests.test_iugn_ui tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_mandate_identity tests.test_iugn_step_documents tests.test_iugn_step_documents_ui tests.test_iugn_contract_ui tests.test_local_pg_config
   sqlite-and-ui:
     runs-on: ubuntu-latest
     steps:
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python -m tests.test_core_workflow
-      - run: python -m unittest tests.test_iugn tests.test_iugn_ui tests.test_permissions tests.test_access_ui tests.test_work_conflict_ui tests.test_lucrari_report_ui tests.test_backup_restore_helpers tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_contract_ui tests.test_local_pg_config
+      - run: python -m unittest tests.test_iugn tests.test_iugn_ui tests.test_permissions tests.test_access_ui tests.test_work_conflict_ui tests.test_lucrari_report_ui tests.test_backup_restore_helpers tests.test_company tests.test_company_ui tests.test_iugn_contract tests.test_iugn_documents tests.test_iugn_mandate_identity tests.test_iugn_step_documents tests.test_iugn_step_documents_ui tests.test_iugn_contract_ui tests.test_local_pg_config
   postgres:
     runs-on: ubuntu-latest
     services:

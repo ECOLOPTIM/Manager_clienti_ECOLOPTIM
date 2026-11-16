@@ -20,9 +20,10 @@ from db import permissions
 from tests.test_iugn import IUGNChecks
 from tests.test_company import CompanyCases
 from tests.test_iugn_documents import ContractIssueCases
+from tests.test_iugn_step_documents import StepDocumentCases
 
 
-class PostgresWorkflow(ContractIssueCases, CompanyCases, IUGNChecks, unittest.TestCase):
+class PostgresWorkflow(StepDocumentCases, ContractIssueCases, CompanyCases, IUGNChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         config = load_config()
